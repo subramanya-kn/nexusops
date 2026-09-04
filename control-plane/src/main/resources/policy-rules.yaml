@@ -1,0 +1,68 @@
+# Declarative policy rules (policy-as-data, ADR-004).
+# Evaluated top to bottom; every rule whose `when` matches fires and contributes its
+# decision. The strongest contribution wins: DENY > REQUIRE_HUMAN > AUTO_APPROVE.
+# All fired rule ids are returned with the decision for explainability.
+
+rules:
+  # --- Hard denials (loop protection) ---
+  - id: repeat-incident-loop
+    when:
+      repeatIncidentWithinMinutes: 30
+      repeatCountAbove: 3
+    decision: DENY
+
+  # --- Escalate to a human for risky changes ---
+  - id: prod-rollback-requires-human
+    when:
+      environment: PROD
+      actionType: ROLLBACK_IMAGE
+    decision: REQUIRE_HUMAN
+
+  - id: prod-high-blast-radius
+    when:
+      environment: PROD
+      blastRadius: HIGH
+    decision: REQUIRE_HUMAN
+
+  - id: low-confidence
+    when:
+      maxConfidenceBelow: 0.5
+    decision: REQUIRE_HUMAN
+
+  - id: many-actions
+    when:
+      actionCountAbove: 3
+    decision: REQUIRE_HUMAN
+
+  - id: rate-limit-service
+    when:
+      autoApprovalsThisHourAbove: 5
+    decision: REQUIRE_HUMAN
+
+  - id: prod-scale-requires-human
+    when:
+      environment: PROD
+      actionType: SCALE_SERVICE
+      blastRadius: MEDIUM
+    decision: REQUIRE_HUMAN
+
+  # --- Auto-approve low-risk cases ---
+  - id: noop-auto
+    when:
+      actionType: NO_OP
+    decision: AUTO_APPROVE
+
+  - id: staging-auto
+    when:
+      environment: STAGING
+    decision: AUTO_APPROVE
+
+  - id: prod-restart-low-blast-auto
+    when:
+      environment: PROD
+      actionType: RESTART_CONTAINER
+      blastRadius: LOW
+    decision: AUTO_APPROVE
+
+# Fallback when no rule fires — fail safe toward a human.
+defaultDecision: REQUIRE_HUMAN

@@ -1,0 +1,102 @@
+spring:
+  application:
+    name: nexusops-control-plane
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/nexusops}
+    username: ${DB_USER:nexusops}
+    password: ${DB_PASSWORD:nexusops}
+  jpa:
+    hibernate:
+      ddl-auto: none              # schema is owned by Flyway; never auto-generated or mutated
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # jwk-set-uri (not issuer-uri) so startup does not hard-depend on Keycloak being
+          # reachable; signature is validated lazily on first token.
+          jwk-set-uri: ${KEYCLOAK_JWKS_URI:http://localhost:8081/realms/nexusops/protocol/openid-connect/certs}
+
+server:
+  port: ${CONTROL_PLANE_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+nexusops:
+  reasoning:
+    base-url: ${REASONING_BASE_URL:http://localhost:8000}
+  docker:
+    host: ${DOCKER_HOST:unix:///var/run/docker.sock}
+  approval:
+    ttl-seconds: 900
+    sweep-ms: 60000
+  execution:
+    max-replicas: 5
+    rate-limit:
+      max-per-window: 10
+      window-seconds: 3600
+  policy:
+    rules-location: classpath:policy-rules.yaml
+  registry:
+    services:
+      - ref: payment-svc
+        environment: PROD
+        health-url: ${PAYMENT_SVC_HEALTH:http://payment-svc:8080/health}
+        cache: false
+      - ref: inventory-svc
+        environment: PROD
+        health-url: ${INVENTORY_SVC_HEALTH:http://inventory-svc:8080/health}
+        cache: false
+      - ref: gateway
+        environment: PROD
+        health-url: ${GATEWAY_HEALTH:http://gateway:8080/health}
+        cache: false
+      - ref: worker
+        environment: STAGING
+        health-url: ${WORKER_HEALTH:http://worker:8080/health}
+        cache: false
+      - ref: cache
+        environment: PROD
+        health-url: ""
+        cache: true
+    known-good-images:
+      - nexusops/demo-svc:v1
+      - nexusops/demo-svc:stable
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      reasoning:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+  timelimiter:
+    instances:
+      reasoning:
+        timeout-duration: 30s
+        cancel-running-future: true
+
+logging:
+  level:
+    io.nexusops: INFO

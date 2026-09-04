@@ -1,0 +1,29 @@
+# macOS AppleDouble (exFAT volume artifacts)
+._*
+.DS_Store
+
+# Java / Maven
+control-plane/target/
+*.class
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Env / secrets
+.env
+*.local
+
+# Build / logs
+*.log
+eval/reports/*.tmp
+
+# claude-flow runtime state (dev tooling)
+.claude-flow/data/
+.claude-flow/sessions/

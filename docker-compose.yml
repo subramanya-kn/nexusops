@@ -1,0 +1,157 @@
+# NexusOps full stack: two planes + backing services + observability + demo target environment.
+# Gate verify-p1: `docker compose up -d` → all health checks green; control /actuator/health and
+# reasoning /health return 200. Third-party infra (keycloak, otel, tempo, grafana) is wired here
+# but fully configured in later phases; only services with healthchecks gate startup.
+
+name: nexusops
+
+services:
+  # --- Backing services ---
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${DB_NAME:-nexusops}
+      POSTGRES_USER: ${DB_USER:-nexusops}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-nexusops}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-nexusops} -d ${DB_NAME:-nexusops}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [nexusnet]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: ["start-dev", "--import-realm", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
+      KC_HTTP_PORT: 8080
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./deploy/keycloak:/opt/keycloak/data/import:ro
+    networks: [nexusnet]
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [nexusnet]
+
+  # --- Observability (fully wired in Phase 6) ---
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./deploy/otel/config.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4318:4318"
+    depends_on: [tempo]
+    networks: [nexusnet]
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./deploy/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "3200:3200"
+    networks: [nexusnet]
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    ports:
+      - "3000:3000"
+    depends_on: [tempo]
+    networks: [nexusnet]
+
+  # --- Planes ---
+  control-plane:
+    build:
+      context: ./control-plane
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-nexusops}
+      DB_USER: ${DB_USER:-nexusops}
+      DB_PASSWORD: ${DB_PASSWORD:-nexusops}
+      KEYCLOAK_JWKS_URI: http://keycloak:8080/realms/nexusops/protocol/openid-connect/certs
+      REASONING_BASE_URL: http://reasoning-plane:8000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+      DOCKER_HOST: unix:///var/run/docker.sock
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [nexusnet]
+
+  reasoning-plane:
+    build:
+      context: ./reasoning-plane
+    environment:
+      NEXUS_LLM_PROVIDER: ${NEXUS_LLM_PROVIDER:-mock}
+      NEXUS_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      NEXUS_CONTROL_PLANE_BASE_URL: http://control-plane:8080
+      NEXUS_OTEL_ENDPOINT: http://otel-collector:4318
+      NEXUS_CHECKPOINTER: ${NEXUS_CHECKPOINTER:-memory}
+    ports:
+      - "8000:8000"
+    networks: [nexusnet]
+
+  # --- Demo target environment (incident subjects) ---
+  payment-svc:
+    build: { context: ./demo-svc }
+    image: nexusops/demo-svc:v1
+    environment: { SERVICE_NAME: payment-svc }
+    mem_limit: 256m
+    networks: [nexusnet]
+
+  inventory-svc:
+    image: nexusops/demo-svc:v1
+    environment: { SERVICE_NAME: inventory-svc }
+    mem_limit: 256m
+    depends_on: [payment-svc]
+    networks: [nexusnet]
+
+  gateway:
+    image: nexusops/demo-svc:v1
+    environment: { SERVICE_NAME: gateway }
+    mem_limit: 256m
+    depends_on: [payment-svc]
+    networks: [nexusnet]
+
+  worker:
+    image: nexusops/demo-svc:v1
+    environment: { SERVICE_NAME: worker }
+    mem_limit: 256m
+    depends_on: [payment-svc]
+    networks: [nexusnet]
+
+  loadgen:
+    image: curlimages/curl:8.10.1
+    restart: unless-stopped
+    command: ["sh", "-c", "while true; do curl -sf http://gateway:8080/health >/dev/null || true; sleep 2; done"]
+    depends_on: [gateway]
+    networks: [nexusnet]
+
+volumes:
+  pgdata:
+
+networks:
+  nexusnet:
+    driver: bridge

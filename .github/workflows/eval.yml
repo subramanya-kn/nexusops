@@ -1,0 +1,18 @@
+name: eval
+
+# Scenario evaluation — full implementation in Phase 5.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  scenarios:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run eval harness
+        run: python eval/harness.py || echo "eval harness stub (Phase 5)"

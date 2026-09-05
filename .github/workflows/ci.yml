@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  control-plane:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Build & unit test
+        working-directory: control-plane
+        run: mvn -q -B verify -DskipITs
+
+  reasoning-plane:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: reasoning-plane
+        run: pip install -e '.[dev]'
+      - name: Lint, types, tests
+        working-directory: reasoning-plane
+        run: |
+          ruff check .
+          mypy --strict app
+          pytest -q

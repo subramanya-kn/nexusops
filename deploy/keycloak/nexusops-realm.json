@@ -1,0 +1,38 @@
+{
+  "realm": "nexusops",
+  "enabled": true,
+  "accessTokenLifespan": 900,
+  "roles": {
+    "realm": [
+      { "name": "operator", "description": "Can raise incidents and request diagnosis" },
+      { "name": "approver", "description": "Can approve or reject remediation plans" },
+      { "name": "admin", "description": "Full control-plane administration" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "nexusops-cli",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "nexusops-cli-secret",
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "operator",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "operator", "temporary": false }],
+      "realmRoles": ["operator"]
+    },
+    {
+      "username": "approver",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "approver", "temporary": false }],
+      "realmRoles": ["operator", "approver"]
+    }
+  ]
+}

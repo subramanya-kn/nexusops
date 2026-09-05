@@ -40,7 +40,44 @@ REMAINING for gate pass: start Docker, run `make verify-p1` (compose up + health
 ## Phase completion
 - [x] Phase 0 — AUDIT.md written
 - [~] Phase 1 — offline parts PASS (mvn verify -DskipTests, pip install -e ., compose config valid); container health-check part pending Docker daemon running locally
-- [ ] Phase 2 — gate: `make verify-p2`
+- [~] Phase 2 — unit tests PASS offline (`mvn test`: 68 run, 0 failures, 11 skipped cleanly — Testcontainers Postgres+Keycloak need Docker, not available locally); full `mvn verify` integration run pending Docker
+
+## Phase 2 tests [2026-09-05]
+Added: ApprovalStateMachineTest (one test per legal transition + illegal-transition table +
+terminal/egress invariants), PolicyEngineTest + RiskScorerTest (against the real committed
+policy-rules.yaml — explainability, precedence DENY>REQUIRE_HUMAN>AUTO_APPROVE, default
+fallback), CapabilityExecutorTest (Mockito — idempotency on executionKey, kill switch,
+allowlist/target validation, rollback digest allowlist, rate limiting, dry-run, NO_OP
+never touches the gateway, every execution is audited), KillSwitchTest, CapabilityRateLimiterTest,
+KeycloakRealmRoleConverterTest (confirms the read-only client shape yields zero ROLE_*
+authorities). Integration (Testcontainers, `disabledWithoutDocker = true` so they skip
+rather than fail without Docker): ReasoningPlaneClient403Test — client-credentials token for
+a `reasoning-plane` client with only a `nexus.read` scope, asserts 403 on every mutating
+route (create incident, diagnose, approve, reject, policy reload, kill-switch engage/release)
+against a real Keycloak + Postgres, 200 on reads; AuditTamperIntegrationTest — raw-JDBC
+payload/prev_hash tamper against a real Postgres, asserts verifyChain() reports the exact
+broken seq.
+
+Added `reasoning-plane` client + `nexus.read` client scope to the committed Keycloak realm
+(previously only `nexusops-cli` existed) — needed a client with zero realm/client roles to
+test 403 against. Added `com.github.dasniko:testcontainers-keycloak:3.5.1` test dependency.
+
+**Bug found and fixed via TDD:** `CapabilityExecutor.validate()`'s SCALE_SERVICE bounds check
+was dead code — it called `boundedReplicas()` which clamps into `[0,maxReplicas]` *before* the
+`> maxReplicas` check, so a plan requesting e.g. 999 replicas would never be rejected, only
+silently clamped to 5. A malicious or hallucinated plan requesting an absurd replica count
+should be blocked (fail-closed), not silently reinterpreted. Fixed: validate() now checks the
+raw requested value; boundedReplicas() remains as a defense-in-depth clamp at dispatch time.
+
+**Toolchain note:** local default `mvn`/`java` resolved to Homebrew-installed JDK 26
+(pre-release), which breaks Mockito's inline mock maker (`Could not modify all classes`).
+Test runs use `JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home`,
+matching the project's actual Java 21 target (recorded in Environment above). `make test`
+should pin/verify JAVA_HOME similarly in CI.
+
+Also: this exFAT-formatted drive regenerates macOS AppleDouble sidecar files (`._Foo.class`)
+inside `target/`, which surefire was picking up as bogus test classes. Added a permanent
+`<excludes>**/._*</excludes>` to the surefire-plugin config in control-plane/pom.xml.
 - [x] Phase 3 — gate: `verify-p3` PASS — pytest 11/11, ruff clean, mypy --strict clean (28 files), injection tests pass, mock diagnosis schema-valid
 - [ ] Phase 4 — gate: `make verify-p4`
 

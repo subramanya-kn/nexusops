@@ -145,7 +145,7 @@ public class CapabilityExecutor {
             }
         }
         if (action.type() == ActionType.SCALE_SERVICE) {
-            int replicas = boundedReplicas(action.parameters());
+            int replicas = rawReplicas(action.parameters());
             if (replicas < 0 || replicas > maxReplicas) {
                 return "replicas out of bounds [0," + maxReplicas + "]";
             }
@@ -153,10 +153,19 @@ public class CapabilityExecutor {
         return null;
     }
 
-    private int boundedReplicas(Map<String, Object> p) {
+    /** The requested value, unclamped — this is what gets bounds-checked in {@link #validate}. */
+    private int rawReplicas(Map<String, Object> p) {
         Object v = p.get("replicas");
-        int replicas = v instanceof Number n ? n.intValue() : 1;
-        return Math.max(0, Math.min(maxReplicas, replicas));
+        return v instanceof Number n ? n.intValue() : 1;
+    }
+
+    /**
+     * Defence in depth for {@link #dispatch}: by the time this runs, {@link #validate} has
+     * already rejected out-of-bounds requests, so this only guards against a race between
+     * validation and dispatch (e.g. a concurrent config reload of {@code maxReplicas}).
+     */
+    private int boundedReplicas(Map<String, Object> p) {
+        return Math.max(0, Math.min(maxReplicas, rawReplicas(p)));
     }
 
     private String describeIntendedOp(PlanAction action) {

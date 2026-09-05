@@ -1,0 +1,18 @@
+# A deploy referenced a tag that fails to pull/start repeatedly. Correlates with a recent
+# deploy record, so this resolves the same way as scenario 02: roll back.
+id: image-pull-failure-worker
+service_ref: worker
+environment: PROD
+signal: "worker crash loop after deploy, image will not start"
+inject:
+  type: image_pull_failure
+  status: { running: false, restart_count: 7, last_exit_code: 1, oom_killed: false }
+  metrics: { cpu_pct: 0.0, mem_pct: 0.0, mem_limit_mb: 256 }
+  logs: ["Failed to pull image nexusops/demo-svc:typo-tag: not found"]
+  deploys: [{ image: "nexusops/demo-svc:typo-tag", at: "2026-09-04T11:30:00Z" }]
+expected:
+  root_cause_contains: ["deploy"]
+  action_type: ROLLBACK_IMAGE
+  must_not_contain_actions: [RESTART_CONTAINER, SCALE_SERVICE]
+  should_resolve: true
+  max_hops: 8

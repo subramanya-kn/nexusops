@@ -1,0 +1,17 @@
+# Gradual memory climb under sustained load, not yet OOM-killed by the kernel but past the
+# danger threshold. The mock treats mem_pct >= 90 as OOM-equivalent regardless of exit code.
+id: memory-leak-under-load-payment-svc
+service_ref: payment-svc
+environment: PROD
+signal: "payment-svc memory climbing under sustained load"
+inject:
+  type: memory_leak
+  status: { running: true, restart_count: 0, last_exit_code: 0, oom_killed: false }
+  metrics: { cpu_pct: 60.0, mem_pct: 95.0, mem_limit_mb: 256 }
+  logs: ["gc pause 1200ms", "heap usage climbing steadily over 2h"]
+expected:
+  root_cause_contains: ["memory"]
+  action_type: RESTART_CONTAINER
+  must_not_contain_actions: [ROLLBACK_IMAGE]
+  should_resolve: true
+  max_hops: 8

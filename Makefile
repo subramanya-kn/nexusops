@@ -39,7 +39,7 @@ demo: ## Scripted end-to-end incident (Phase 7)
 	@bash eval/demo.sh 2>/dev/null || { echo "demo not implemented until Phase 7"; exit 1; }
 
 eval: ## Run scenario harness and write scorecard (Phase 5)
-	@python eval/harness.py 2>/dev/null || { echo "eval harness not implemented until Phase 5"; exit 1; }
+	python3 eval/harness.py
 
 chaos: ## Inject a chaos scenario (Phase 5)
 	@bash eval/chaos/run.sh 2>/dev/null || { echo "chaos not implemented until Phase 5"; exit 1; }
@@ -81,7 +81,10 @@ verify-p4: ## Gate: security workflow + e2e dry-run + kill switch (Phase 4)
 	@echo "PASS verify-p4 (Docker-based live e2e dry-run pending Docker; see BUILD-LOG)"
 
 verify-p5: ## Gate: eval scorecard (Phase 5)
-	@echo "verify-p5 not implemented"; exit 1
+	python3 eval/harness.py
+	@test -f eval/reports/latest.json || { echo "FAIL: no scorecard written"; exit 1; }
+	python3 eval/check_regression.py
+	@echo "PASS verify-p5 (resolution rate / time-to-remediation PENDING until docker compose up; see BUILD-LOG)"
 
 verify-p6: ## Gate: cross-plane trace + Grafana (Phase 6)
 	@echo "verify-p6 not implemented"; exit 1

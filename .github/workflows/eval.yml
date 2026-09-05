@@ -1,7 +1,9 @@
 name: eval
 
-# Scenario evaluation — full implementation in Phase 5.
 on:
+  push:
+    branches: [main, master]
+  pull_request:
   workflow_dispatch:
   schedule:
     - cron: "0 6 * * 1"
@@ -14,5 +16,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run eval harness
-        run: python eval/harness.py || echo "eval harness stub (Phase 5)"
+      - name: Install reasoning-plane
+        working-directory: reasoning-plane
+        run: pip install -e .
+      - name: Run 12 chaos scenarios, write scorecard
+        run: python eval/harness.py
+      - name: Fail on regression against committed baseline
+        run: python eval/check_regression.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-scorecard
+          path: eval/reports/latest.json

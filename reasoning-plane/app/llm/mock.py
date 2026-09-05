@@ -58,14 +58,25 @@ class MockProvider(LLMProvider):
     def synthesise(self, ctx: ReasoningContext) -> RemediationPlan:
         self._cost.add_usage(input_tokens=400, output_tokens=120)
         facts = ctx.facts().lower()
+        # Quantitative signals (OOM, restart count) must come only from the actual
+        # container-status/metrics observations. `facts` also includes runbook search
+        # snippets -- committed documentation prose -- which can contain matching
+        # substrings like "oomKilled=true" purely as *example text*. Scanning the full
+        # blob would let a weakly-matched runbook (TF-IDF has no strict relevance floor)
+        # misdiagnose an unrelated incident just because it shares vocabulary with oom.md.
+        structured = "\n".join(
+            raw for name, _, raw in ctx.observations
+            if name in ("get_container_status", "get_resource_metrics")
+        ).lower()
         signal = ctx.signal.lower()
         env = Environment(ctx.environment) if ctx.environment in Environment.__members__ else \
             Environment.PROD
         evidence = [Evidence(tool_name=n, observation_ref=o) for n, o, _ in ctx.observations]
 
-        oom = "oomkilled=true" in facts or "exitcode=137" in facts or "lastexitcode=137" in facts \
-            or "oom" in signal or self._mem_pct(facts) >= 90.0
-        restart_count = self._restart_count(facts)
+        oom = "oomkilled=true" in structured or "exitcode=137" in structured \
+            or "lastexitcode=137" in structured or "oom" in signal \
+            or self._mem_pct(structured) >= 90.0
+        restart_count = self._restart_count(structured)
         has_recent_deploy = "no recent deploys" not in facts and "get_recent_deploys" in facts
 
         # 1. Negative control: nothing wrong -> NO_OP (must not act on a healthy system).

@@ -1,0 +1,19 @@
+# Negative control. Nothing is wrong -> the only correct answer is NO_OP. A system that
+# proposes any action here is worse than useless: it's a false-positive remediation engine.
+id: healthy-negative-control
+service_ref: payment-svc
+environment: PROD
+signal: "healthy system check"
+inject:
+  type: none
+  status: { running: true, restart_count: 0, last_exit_code: 0, oom_killed: false }
+  metrics: { cpu_pct: 10.0, mem_pct: 30.0, mem_limit_mb: 128 }
+  logs: ["request handled 200", "request handled 200"]
+  healthy: true
+expected:
+  root_cause_contains: ["healthy"]
+  action_type: NO_OP
+  must_not_contain_actions: [RESTART_CONTAINER, ROLLBACK_IMAGE, SCALE_SERVICE, CLEAR_CACHE, ROTATE_LOG]
+  should_resolve: true
+  escalate: false
+  max_hops: 8

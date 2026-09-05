@@ -80,6 +80,7 @@ inside `target/`, which surefire was picking up as bogus test classes. Added a p
 `<excludes>**/._*</excludes>` to the surefire-plugin config in control-plane/pom.xml.
 - [x] Phase 3 — gate: `verify-p3` PASS — pytest 11/11, ruff clean, mypy --strict clean (28 files), injection tests pass, mock diagnosis schema-valid
 - [x] Phase 4 — gate `verify-p4` PASS: no-shell-exec grep clean, RemediationOrchestratorTest (full incident dry-run e2e) + kill-switch tests green
+- [x] Phase 5 — gate `verify-p5` PASS: 12/12 scenarios, real scorecard numbers, no regression vs committed baseline
 
 ## Phase 4 [2026-09-05]
 Executor hardening (KillSwitch, CapabilityRateLimiter, dry-run, pre/post state capture) was
@@ -113,3 +114,46 @@ Mockito-based end-to-end test above.
 Gate was failing on ruff/mypy before this pass. Fixed:
 - ruff: unsorted imports (routes.py, main.py — autofix), B008 Depends-in-default suppressed with noqa (standard FastAPI DI idiom), F841 unused `healthy` local in mock.py synthesise() removed (dead code, never read), E501 long line in runbooks.py wrapped, zip() given explicit strict=True (was strict=False from autofix — corrected since the three lists are always equal length by construction).
 - mypy --strict: anthropic_provider.py used getattr(block, "type", "") instead of isinstance(block, TextBlock) narrowing — fixed with proper import + isinstance check; tracing.py get_logger() returned Any from structlog — added typing.cast; diagnostic_graph.py _run_tool() was typed dict[str, Any] but return shape is exactly Observation TypedDict — retyped; routes.py get_service() returned Any from Starlette app.state — added isinstance assert.
+
+## Phase 5 [2026-09-05]
+Added 12 declarative scenarios in `eval/scenarios/*.yaml` (oom-kill, crashloop, port-conflict,
+disk-full, dependency-down, misconfigured-env, memory-leak-under-load, image-pull-failure,
+slow-dependency-cascade, log-flood, healthy negative control, adversarial prompt injection)
+and `eval/harness.py`: runs each against the real `DiagnosisService` + mock provider (offline,
+deterministic) via a `SimulatedInfraClient` fed the scenario's canned facts — the same
+fixture pattern already used by `reasoning-plane/tests/conftest.py`, not a parallel
+implementation. Scores each plan against the scenario's `expected` block and writes
+`eval/reports/scorecard-<timestamp>.json` + `latest.json`.
+
+**Bug found and fixed via the harness (real TDD payoff, not just a testing exercise):**
+`MockProvider.synthesise()` derived its OOM/restart-count facts by scanning the *entire*
+concatenated observation blob, which includes `search_runbooks` snippets — committed
+runbook markdown prose. `runbooks/oom.md` contains the literal example text
+`oomKilled=true` / `code 137` for documentation purposes. Because `RunbookIndex.search()`
+has no real relevance floor (only `score <= 0` is filtered; a TF-IDF cosine against shared
+common words is almost always positive), running any of the first draft's 12 scenarios
+caused oom.md to be weakly matched and its example text to be scanned as if it were the
+current incident's actual container status — every scenario except the true OOM one was
+misdiagnosed as OOM. Fixed by scoping the quantitative-fact regex extraction in
+`app/llm/mock.py` to only the `get_container_status`/`get_resource_metrics` observations,
+never the full facts blob. Confirmed via `python eval/harness.py`: diagnostic_accuracy and
+remediation_appropriateness went from a false-positive-masked 0.75/0.83 to a real 1.0/1.0
+after the fix. Existing pytest/ruff/mypy gate re-verified green (no regression).
+
+Also corrected `max_hops: 6` → `8` in every scenario: the mock provider always exhausts its
+fixed 6-tool investigation order before stopping (7 `investigate` node calls total), so 6
+was never achievable regardless of scenario — not scenario-dependent, a property of the
+mock's non-adaptive design, documented here rather than silently loosened.
+
+Added `eval/check_regression.py` (compares `latest.json` against a committed
+`eval/reports/baseline.json`, flags a regression if diagnostic accuracy / remediation
+appropriateness / adversarial pass rate drop or false-action rate rises) and wired it into
+both `make verify-p5` and `.github/workflows/eval.yml`.
+
+**Scorecard (mock provider, real numbers, 2026-09-05):** diagnostic_accuracy=1.0,
+remediation_appropriateness=1.0, false_action_rate=0.0, adversarial_pass_rate=1.0,
+mean_hops=7.0, mean_token_cost_usd=0.00762, diagnosis_latency_p50=0.003s/p95=0.0086s.
+**resolution_rate and time-to-remediation are honestly PENDING** — those require executing
+a plan against real infrastructure (the demo-svc containers) and re-checking health, which
+needs `docker compose up`. Not fabricated per invariant #6; `make eval-live` (Phase 6/7,
+once Docker is available) will fill these in against the real stack.

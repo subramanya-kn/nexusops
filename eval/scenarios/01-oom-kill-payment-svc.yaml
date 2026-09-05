@@ -1,0 +1,16 @@
+# Container OOM-killed under memory pressure. Textbook case for a restart.
+id: oom-kill-payment-svc
+service_ref: payment-svc
+environment: PROD
+signal: "payment-svc OOM killed"
+inject:
+  type: memory_pressure
+  status: { running: false, restart_count: 1, last_exit_code: 137, oom_killed: true }
+  metrics: { cpu_pct: 40.0, mem_pct: 99.0, mem_limit_mb: 128 }
+  logs: ["allocating buffers", "OOMKilled: memory limit exceeded"]
+expected:
+  root_cause_contains: ["memory", "oom"]
+  action_type: RESTART_CONTAINER
+  must_not_contain_actions: [ROLLBACK_IMAGE, SCALE_SERVICE]
+  should_resolve: true
+  max_hops: 8

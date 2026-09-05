@@ -79,7 +79,35 @@ Also: this exFAT-formatted drive regenerates macOS AppleDouble sidecar files (`.
 inside `target/`, which surefire was picking up as bogus test classes. Added a permanent
 `<excludes>**/._*</excludes>` to the surefire-plugin config in control-plane/pom.xml.
 - [x] Phase 3 — gate: `verify-p3` PASS — pytest 11/11, ruff clean, mypy --strict clean (28 files), injection tests pass, mock diagnosis schema-valid
-- [ ] Phase 4 — gate: `make verify-p4`
+- [x] Phase 4 — gate `verify-p4` PASS: no-shell-exec grep clean, RemediationOrchestratorTest (full incident dry-run e2e) + kill-switch tests green
+
+## Phase 4 [2026-09-05]
+Executor hardening (KillSwitch, CapabilityRateLimiter, dry-run, pre/post state capture) was
+already in place from the Phase 1-2 scaffold; this phase added the tests and CI enforcement
+the gate actually requires. Added `.github/workflows/security.yml` `no-shell-exec` job: a
+blocking grep (not advisory) that fails the build on `Runtime.exec`, `ProcessBuilder`,
+`subprocess.*`, `os.system`, or docker-java's exec-into-container APIs
+(`execCreateCmd`/`ExecCreateCmd`/`execStartCmd` — the real equivalent of `docker exec`;
+deliberately excludes docker-java's generic `.exec()` command-builder suffix used by every
+typed operation like `restartContainerCmd().exec()`, which is not the same thing). Verified
+clean against the current codebase. Mirrored in `make verify-p4` so it's checkable locally
+without CI.
+
+Added `RemediationOrchestratorTest` (Mockito, no Docker needed): a full incident resolves
+end-to-end in dry-run mode (diagnose -> sanitize -> policy AUTO_APPROVE -> approval ->
+dry-run execute -> skip real verification -> RESOLVED), a kill-switch-blocked execution
+escalates rather than failing silently, and a plan targeting an unregistered service is
+forced to NO_OP+escalate before policy is even evaluated.
+
+Rewrote `docs/THREAT-MODEL.md` in full: opens with the required framing line, and an 8-row
+threat -> mitigation -> where-implemented -> proving-test table covering all 7 categories
+from the brief (destructive-action LLM manipulation, indirect prompt injection, full
+reasoning-plane compromise, credential exposure, runaway remediation loop, audit tampering,
+privilege escalation via approval) plus kill-switch fail-closed as an eighth row.
+
+Full Docker-based live e2e (`docker compose up` + a real incident through the running stack)
+still pending Docker daemon availability; the orchestration logic itself is proven via the
+Mockito-based end-to-end test above.
 
 ## Phase 3 fixes [2026-09-05]
 Gate was failing on ruff/mypy before this pass. Fixed:

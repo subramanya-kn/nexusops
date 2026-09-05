@@ -72,7 +72,13 @@ verify-p3: ## Gate: reasoning-plane tests + lint + types (Phase 3)
 	cd $(RP) && pytest -q && ruff check . && mypy --strict app
 
 verify-p4: ## Gate: security workflow + e2e dry-run + kill switch (Phase 4)
-	@echo "verify-p4 not implemented"; exit 1
+	@echo "== no-shell-exec grep check =="
+	@PATTERN='Runtime\.exec|Runtime\.getRuntime\(\)\.(exec|halt)|new ProcessBuilder|\bProcessBuilder\(|\bsubprocess\.(run|Popen|call|check_call|check_output)|\bos\.system\(|execCreateCmd|ExecCreateCmd|execStartCmd'; \
+	MATCHES=$$(grep -rnE "$$PATTERN" $(CP)/src/main $(RP)/app demo-svc --include='*.java' --include='*.py' || true); \
+	if [ -n "$$MATCHES" ]; then echo "FAIL: forbidden shell/exec pattern found:"; echo "$$MATCHES"; exit 1; fi
+	@echo "== control-plane: full incident dry-run + kill switch tests =="
+	cd $(CP) && mvn -q -B test -Dtest=RemediationOrchestratorTest,CapabilityExecutorTest,KillSwitchTest
+	@echo "PASS verify-p4 (Docker-based live e2e dry-run pending Docker; see BUILD-LOG)"
 
 verify-p5: ## Gate: eval scorecard (Phase 5)
 	@echo "verify-p5 not implemented"; exit 1

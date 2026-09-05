@@ -1,6 +1,5 @@
 name: security
 
-# Security scanning — expanded in Phase 4 (SAST, dependency + image scan, secret scan).
 on:
   push:
     branches: [main, master]
@@ -8,6 +7,28 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Invariant #2: "LLM output never becomes a command string." No Runtime.exec, no
+  # ProcessBuilder, no shell, no docker exec, no subprocess/os.system — anywhere, in
+  # either service. This is a blocking check, not advisory: a single match fails the build.
+  no-shell-exec:
+    name: No shell/exec in application code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail on forbidden shell/exec patterns
+        run: |
+          set -e
+          PATTERN='Runtime\.exec|Runtime\.getRuntime\(\)\.(exec|halt)|new ProcessBuilder|\bProcessBuilder\(|\bsubprocess\.(run|Popen|call|check_call|check_output)|\bos\.system\(|execCreateCmd|ExecCreateCmd|execStartCmd'
+          MATCHES=$(grep -rnE "$PATTERN" \
+            control-plane/src/main reasoning-plane/app demo-svc \
+            --include='*.java' --include='*.py' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::Forbidden shell/exec pattern found (see docs/THREAT-MODEL.md, invariant #2):"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "Clean: no shell/exec patterns in application code."
+
   dependency-scan:
     runs-on: ubuntu-latest
     steps:
@@ -18,4 +39,4 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
-          exit-code: "0" # non-blocking until Phase 4 hardening
+          exit-code: "0" # non-blocking until image scanning is wired up in Phase 7

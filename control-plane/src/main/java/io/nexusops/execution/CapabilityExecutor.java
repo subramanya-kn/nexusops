@@ -63,7 +63,14 @@ public class CapabilityExecutor {
 
     /**
      * Execute (or dry-run) one action. Idempotent on {@code executionKey}.
+     *
+     * <p>Bulkheaded: bounds concurrent capability executions so a burst of auto-approved
+     * incidents can't pile up unbounded calls against the infrastructure gateway. A
+     * rejection degrades to a {@code BLOCKED} record — same fail-closed shape as every
+     * other guard in this chain — rather than propagating an exception to the caller.
      */
+    @io.github.resilience4j.bulkhead.annotation.Bulkhead(name = "execution",
+            fallbackMethod = "bulkheadRejected")
     public ExecutionRecordEntity execute(String incidentId, String correlationId,
                                          PlanAction action, String executionKey, boolean dryRun) {
         // 1. Idempotency.
@@ -177,6 +184,15 @@ public class CapabilityExecutor {
                 "capability", action.type().name(),
                 "targetRef", action.targetRef(),
                 "parameters", action.parameters()));
+    }
+
+    @SuppressWarnings("unused") // invoked reflectively by Resilience4j on bulkhead rejection
+    private ExecutionRecordEntity bulkheadRejected(String incidentId, String correlationId,
+                                                    PlanAction action, String executionKey,
+                                                    boolean dryRun, Throwable t) {
+        return record(incidentId, correlationId, executionKey, action, dryRun,
+                ExecutionStatus.BLOCKED, describeIntendedOp(action), null, null,
+                "bulkhead full: " + t.getClass().getSimpleName(), "EXECUTION_BLOCKED");
     }
 
     private ExecutionRecordEntity record(String incidentId, String correlationId,

@@ -82,6 +82,7 @@ inside `target/`, which surefire was picking up as bogus test classes. Added a p
 - [x] Phase 4 — gate `verify-p4` PASS: no-shell-exec grep clean, RemediationOrchestratorTest (full incident dry-run e2e) + kill-switch tests green
 - [x] Phase 5 — gate `verify-p5` PASS: 12/12 scenarios, real scorecard numbers, no regression vs committed baseline
 - [~] Phase 6 — gate `verify-p6` PASS at config level (dashboard JSON valid, compose wiring valid, CP tests green); live trace-across-services + "dashboard loads with data" pending Docker
+- [~] Phase 7 — gate `verify-p7` PASS for all offline parts (full CP+RP test suites, no-shell-exec, eval regression); `make demo` from a clean `make up` pending Docker
 
 ## Phase 4 [2026-09-05]
 Executor hardening (KillSwitch, CapabilityRateLimiter, dry-run, pre/post state capture) was
@@ -208,3 +209,72 @@ instrumentation). The two live assertions in the actual gate — a single trace 
 spans from both services, and the dashboard loading with real data — require `docker
 compose up` and `make demo`, which need Docker; this environment doesn't have it running.
 Everything that can be verified without a Docker daemon has been.
+
+## Phase 7 [2026-09-06]
+Java production signals already largely in place from Phase 1-2 (constructor injection
+throughout, bean-validated DTOs via `@Valid`, `@ControllerAdvice`/`GlobalExceptionHandler`
+already emitting proper RFC 7807 `ProblemDetail`, `DockerHealthIndicator` +
+`ReasoningPlaneHealthIndicator` custom Actuator health probes, Resilience4j circuit
+breaker + timeout already wired on `ReasoningPlaneClient`). Added the one missing piece:
+a Resilience4j **bulkhead** on `CapabilityExecutor.execute()` (`max-concurrent-calls: 8`),
+so a burst of auto-approved incidents can't pile up unbounded infrastructure-gateway
+calls; a bulkhead rejection degrades to a `BLOCKED` execution record via a fallback
+method — same fail-closed shape as every other guard in that chain — rather than
+propagating an exception. Python side already fully async, Pydantic v2 settings,
+pytest-asyncio, mock-in-tests/real-in-eval — no gaps found.
+
+**Real gap found and fixed while wiring `make demo`:** the reasoning plane's
+`HttpInfraClient` (used against a live compose stack, as opposed to the
+`SimulatedInfraClient` the test suite and eval harness use) expects each demo service to
+expose `/status`, `/logs`, `/metrics-json`, `/deploys`, `/deps` read-only introspection
+endpoints. `demo-svc/app.py` never implemented them — only `/health` and the chaos
+toggles existed. Against a real `docker compose up`, every diagnosis would have silently
+gotten 404s parsed as empty/garbage facts, meaning the live demo could never actually
+detect an incident correctly regardless of how correct the reasoning-plane logic is.
+Fixed: `/metrics-json` now reads real cgroup memory usage (v2 `memory.current`, v1
+fallback) against the container's memory limit for a genuine `memPct`; `/status` reports
+a restart counter persisted to a container-local file (survives a restart-policy relaunch
+since that reuses the same container's writable layer, unlike a fresh container); `/logs`
+serves an in-memory ring buffer capturing real log lines including the crash/logflood
+toggles; `/deploys` and `/deps` are configurable via `DEPLOY_IMAGE`/`DEPLOY_AT`/
+`DEPENDS_ON` env vars for the crashloop-with-deploy and dependency-cascade scenarios.
+Smoke-tested via FastAPI TestClient end to end (leak toggle -> real `memPct` increase).
+
+Added `eval/demo.sh` (wired to `make demo`): obtains an OPERATOR token from Keycloak,
+injects memory pressure on payment-svc via the loadgen container (same Docker network,
+no host port publishing needed), creates an incident, triggers diagnose, polls for a
+terminal state, prints the audit chain verification, and resets demo-svc state for
+repeatability. Written directly against the real API contracts (confirmed by re-reading
+every controller) but **not yet run against a live stack** — no Docker in this
+environment. Documented as such rather than claimed working.
+
+Added six ADRs in `docs/ADR/` (0001 two-plane split, 0002 closed action enum, 0003
+hash-chained audit, 0004 policy-as-data, 0005 LangGraph for the ReAct loop, 0006 optional
+Postgres checkpointer) — each with context/decision/consequences/alternatives-rejected,
+cross-referencing the actual tests that prove each decision's properties.
+
+Added `LICENSE` (MIT), `CONTRIBUTING.md`, `.pre-commit-config.yaml` (ruff/ruff-format on
+the reasoning plane, the no-shell-exec check as a local hook mirroring CI, a fast subset
+of control-plane tests), and `docs/api/openapi.yaml` — hand-authored against the actual
+controllers (springdoc-openapi is on the classpath and serves the equivalent spec live at
+`/v3/api-docs` once the app is running against real Postgres/Keycloak; the committed file
+is the offline-reviewable equivalent, to be diffed against the live one once Docker is
+available).
+
+Expanded `.github/workflows/security.yml`: added an `image-scan` job (builds all three
+Dockerfiles, Trivy-scans each image — distinct from the existing filesystem scan) and a
+`secret-scan` job (gitleaks). Both currently non-blocking (`exit-code: "0"`) until a
+triage/allowlist process exists for known findings, matching the existing filesystem-scan
+posture.
+
+Fixed a portability bug in the Makefile while running `verify-p7`: `verify-p3` and
+`verify-p7` invoked bare `pytest`/`ruff`/`mypy`, which resolves inconsistently depending
+on which Python environment's `bin/` happens to be on `$PATH` first (this machine's `ruff`
+console script wasn't on PATH at all despite the package being installed). Switched to
+`python3 -m pytest`/`python3 -m ruff`/`python3 -m mypy`, which always resolves against
+the same interpreter `pip install -e .` was run against.
+
+verify-p7: PASS for every offline-checkable part — full control-plane test suite, full
+reasoning-plane pytest/ruff/mypy --strict, no-shell-exec grep, eval scorecard with no
+regression against baseline. `make demo` succeeding "from a clean `make up`" is the one
+assertion in this gate that fundamentally requires Docker and has not been exercised.

@@ -1,0 +1,307 @@
+openapi: 3.0.3
+info:
+  title: NexusOps Control Plane API
+  description: >
+    Policy-gated autonomous incident remediation. This spec documents the actual routes
+    in io.nexusops.* controllers. It is hand-maintained to match the code until CI can
+    generate+diff it against the live /v3/api-docs endpoint (springdoc-openapi is on the
+    classpath and serves the same spec at runtime once the control plane is running, e.g.
+    against a live `docker compose up` stack with Postgres + Keycloak reachable).
+  version: "0.1.0"
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://localhost:8080
+    description: Local compose stack
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/incidents:
+    get:
+      summary: List incidents
+      description: Open to any authenticated principal, including the read-only reasoning-plane client.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/IncidentView" }
+    post:
+      summary: Create an incident
+      description: Requires the OPERATOR role. Forbidden for the reasoning-plane client.
+      security: [{ bearerAuth: [OPERATOR] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateIncidentRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IncidentView" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/incidents/{id}:
+    get:
+      summary: Get one incident
+      parameters:
+        - $ref: "#/components/parameters/IncidentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IncidentView" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/incidents/{id}/diagnose:
+    post:
+      summary: Trigger the diagnose -> gate loop for an incident
+      description: >
+        Requires OPERATOR. dryRun=true runs end to end (diagnose, gate, execute) without
+        mutating infrastructure -- the executor still runs its full guard chain and
+        returns the exact intended operation.
+      security: [{ bearerAuth: [OPERATOR] }]
+      parameters:
+        - $ref: "#/components/parameters/IncidentId"
+        - name: dryRun
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "202":
+          description: Accepted (diagnosis + gating runs synchronously; 202 reflects async execution semantics)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiagnoseResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/approvals/{id}:
+    get:
+      summary: Get one approval record
+      parameters:
+        - $ref: "#/components/parameters/ApprovalId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalView" }
+
+  /api/approvals/{id}/approve:
+    post:
+      summary: Approve a pending remediation plan
+      description: >
+        Requires APPROVER. The approving subject is always the authenticated JWT's
+        subject -- never a request parameter -- so approvals are non-repudiable.
+      security: [{ bearerAuth: [APPROVER] }]
+      parameters:
+        - $ref: "#/components/parameters/ApprovalId"
+        - name: dryRun
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalView" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/approvals/{id}/reject:
+    post:
+      summary: Reject a pending remediation plan
+      security: [{ bearerAuth: [APPROVER] }]
+      parameters:
+        - $ref: "#/components/parameters/ApprovalId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalView" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/audit/verify:
+    get:
+      summary: Walk and validate the entire hash-chained audit log
+      responses:
+        "200":
+          description: Chain intact
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChainVerification" }
+        "409":
+          description: Tampering detected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChainVerification" }
+
+  /api/admin/policy/reload:
+    post:
+      summary: Reload policy-rules.yaml at runtime
+      description: Requires ADMIN.
+      security: [{ bearerAuth: [ADMIN] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { reloaded: { type: boolean } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/execution/kill-switch/engage:
+    post:
+      summary: Engage the global execution kill switch
+      description: Requires ADMIN. Every capability execution is refused (fail-closed) while engaged.
+      security: [{ bearerAuth: [ADMIN] }]
+      parameters:
+        - name: reason
+          in: query
+          schema: { type: string, default: manual }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KillSwitchState" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/execution/kill-switch/release:
+    post:
+      summary: Release the global execution kill switch
+      security: [{ bearerAuth: [ADMIN] }]
+      parameters:
+        - name: reason
+          in: query
+          schema: { type: string, default: manual }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KillSwitchState" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /actuator/health:
+    get:
+      summary: Liveness/readiness, including custom Docker + reasoning-plane indicators
+      security: []
+      responses:
+        "200": { description: UP }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Keycloak-issued JWT. Roles come from realm_access/resource_access claims (see KeycloakRealmRoleConverter).
+
+  parameters:
+    IncidentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    ApprovalId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Forbidden:
+      description: Authenticated but lacking the required role (RFC 7807 problem detail)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetail" }
+    NotFound:
+      description: Not found (RFC 7807 problem detail)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ProblemDetail" }
+
+  schemas:
+    ProblemDetail:
+      type: object
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+
+    Environment:
+      type: string
+      enum: [STAGING, PROD]
+
+    ActionType:
+      type: string
+      enum: [RESTART_CONTAINER, SCALE_SERVICE, ROLLBACK_IMAGE, CLEAR_CACHE, ROTATE_LOG, NO_OP]
+      description: Closed set -- see docs/ADR/0002-closed-action-enum.md.
+
+    BlastRadius:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+
+    CreateIncidentRequest:
+      type: object
+      required: [serviceRef, environment, signal]
+      properties:
+        serviceRef: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        signal: { type: string }
+
+    IncidentView:
+      type: object
+      properties:
+        id: { type: string }
+        correlationId: { type: string }
+        serviceRef: { type: string }
+        environment: { type: string }
+        signal: { type: string }
+        status:
+          type: string
+          enum: [DETECTED, DIAGNOSING, PLANNED, GATED, EXECUTING, VERIFYING, RESOLVED, ESCALATED, CLOSED]
+
+    DiagnoseResponse:
+      type: object
+      properties:
+        incidentId: { type: string }
+        approvalId: { type: string, nullable: true }
+        state: { type: string }
+
+    ApprovalView:
+      type: object
+      properties:
+        id: { type: string }
+        incidentId: { type: string }
+        state:
+          type: string
+          enum: [PROPOSED, PENDING_APPROVAL, APPROVED, EXECUTING, VERIFYING, RESOLVED, REJECTED, EXPIRED, FAILED, ESCALATED, CLOSED]
+        decision: { type: string, enum: [AUTO_APPROVE, REQUIRE_HUMAN, DENY] }
+        approverSubject: { type: string, nullable: true }
+        riskScore: { type: number, format: double }
+        detail: { type: string, nullable: true }
+
+    ChainVerification:
+      type: object
+      properties:
+        valid: { type: boolean }
+        entries: { type: integer, format: int64 }
+        brokenAtSeq: { type: integer, format: int64, nullable: true }
+        detail: { type: string }
+
+    KillSwitchState:
+      type: object
+      properties:
+        engaged: { type: boolean }
+        reason: { type: string }

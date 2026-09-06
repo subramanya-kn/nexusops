@@ -96,6 +96,13 @@ resilience4j:
       reasoning:
         timeout-duration: 30s
         cancel-running-future: true
+  bulkhead:
+    instances:
+      # Bounds concurrent capability executions -- a burst of approvals (e.g. many
+      # incidents auto-approved at once) can't pile up unbounded Docker API calls.
+      execution:
+        max-concurrent-calls: 8
+        max-wait-duration: 500ms
 
 logging:
   level:

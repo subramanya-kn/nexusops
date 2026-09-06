@@ -1,0 +1,43 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^deploy/keycloak/nexusops-realm\.json$
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        files: ^reasoning-plane/
+        args: ["--fix"]
+      - id: ruff-format
+        files: ^reasoning-plane/
+
+  - repo: local
+    hooks:
+      - id: no-shell-exec
+        name: no shell/exec in application code (invariant #2)
+        language: system
+        entry: >-
+          bash -c '
+          set -e;
+          PATTERN="Runtime\.exec|Runtime\.getRuntime\(\)\.(exec|halt)|new ProcessBuilder|\bProcessBuilder\(|\bsubprocess\.(run|Popen|call|check_call|check_output)|\bos\.system\(|execCreateCmd|ExecCreateCmd|execStartCmd";
+          MATCHES=$(grep -rnE "$PATTERN" control-plane/src/main reasoning-plane/app demo-svc --include="*.java" --include="*.py" || true);
+          if [ -n "$MATCHES" ]; then echo "$MATCHES"; exit 1; fi
+          '
+        pass_filenames: false
+        always_run: true
+
+      - id: mvn-test-quick
+        name: control-plane unit tests (fast subset)
+        language: system
+        entry: bash -c 'cd control-plane && mvn -q -B test -Dtest=ApprovalStateMachineTest,PolicyEngineTest,CapabilityExecutorTest'
+        pass_filenames: false
+        files: ^control-plane/src/main/java/.*\.java$

@@ -39,4 +39,46 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
-          exit-code: "0" # non-blocking until image scanning is wired up in Phase 7
+          exit-code: "0" # non-blocking: informational until a triage/allowlist process exists
+
+  image-scan:
+    name: Trivy image scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build control-plane image
+        run: docker build -t nexusops/control-plane:ci ./control-plane
+      - name: Build reasoning-plane image
+        run: docker build -t nexusops/reasoning-plane:ci ./reasoning-plane
+      - name: Build demo-svc image
+        run: docker build -t nexusops/demo-svc:ci ./demo-svc
+      - name: Scan control-plane image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: nexusops/control-plane:ci
+          severity: CRITICAL,HIGH
+          exit-code: "0" # informational until a triage/allowlist process exists
+      - name: Scan reasoning-plane image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: nexusops/reasoning-plane:ci
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+      - name: Scan demo-svc image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: nexusops/demo-svc:ci
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

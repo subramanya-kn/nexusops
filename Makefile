@@ -33,10 +33,10 @@ build: ## Build both planes locally (no containers)
 
 test: ## Run unit tests in both planes
 	cd $(CP) && mvn -q -B test
-	cd $(RP) && pytest -q
+	cd $(RP) && python3 -m pytest -q
 
 demo: ## Scripted end-to-end incident (Phase 7)
-	@bash eval/demo.sh 2>/dev/null || { echo "demo not implemented until Phase 7"; exit 1; }
+	bash eval/demo.sh
 
 eval: ## Run scenario harness and write scorecard (Phase 5)
 	python3 eval/harness.py
@@ -69,7 +69,7 @@ verify-p2: ## Gate: control-plane integration tests (Phase 2)
 	cd $(CP) && mvn -q -B verify
 
 verify-p3: ## Gate: reasoning-plane tests + lint + types (Phase 3)
-	cd $(RP) && pytest -q && ruff check . && mypy --strict app
+	cd $(RP) && python3 -m pytest -q && python3 -m ruff check . && python3 -m mypy --strict app
 
 verify-p4: ## Gate: security workflow + e2e dry-run + kill switch (Phase 4)
 	@echo "== no-shell-exec grep check =="
@@ -96,7 +96,18 @@ verify-p6: ## Gate: cross-plane trace + Grafana (Phase 6)
 	@echo "PASS verify-p6 (config-level checks only; live trace-across-services + dashboard-loads-with-data need docker compose up -- see BUILD-LOG)"
 
 verify-p7: ## Gate: full CI + make demo from clean up (Phase 7)
-	@echo "verify-p7 not implemented"; exit 1
+	@echo "== control-plane: full test suite =="
+	cd $(CP) && mvn -q -B test
+	@echo "== reasoning-plane: pytest + ruff + mypy --strict =="
+	cd $(RP) && python3 -m pytest -q && python3 -m ruff check . && python3 -m mypy --strict app
+	@echo "== no-shell-exec grep check =="
+	@PATTERN='Runtime\.exec|Runtime\.getRuntime\(\)\.(exec|halt)|new ProcessBuilder|\bProcessBuilder\(|\bsubprocess\.(run|Popen|call|check_call|check_output)|\bos\.system\(|execCreateCmd|ExecCreateCmd|execStartCmd'; \
+	MATCHES=$$(grep -rnE "$$PATTERN" $(CP)/src/main $(RP)/app demo-svc --include='*.java' --include='*.py' || true); \
+	if [ -n "$$MATCHES" ]; then echo "FAIL: forbidden shell/exec pattern found:"; echo "$$MATCHES"; exit 1; fi
+	@echo "== eval scorecard, no regression =="
+	python3 eval/harness.py
+	python3 eval/check_regression.py
+	@echo "PASS verify-p7 (offline parts); 'make demo' from a clean 'make up' needs Docker -- see BUILD-LOG"
 
 verify-p8: ## Gate: README integrity (Phase 8)
 	@echo "verify-p8 not implemented"; exit 1

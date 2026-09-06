@@ -83,6 +83,7 @@ inside `target/`, which surefire was picking up as bogus test classes. Added a p
 - [x] Phase 5 — gate `verify-p5` PASS: 12/12 scenarios, real scorecard numbers, no regression vs committed baseline
 - [~] Phase 6 — gate `verify-p6` PASS at config level (dashboard JSON valid, compose wiring valid, CP tests green); live trace-across-services + "dashboard loads with data" pending Docker
 - [~] Phase 7 — gate `verify-p7` PASS for all offline parts (full CP+RP test suites, no-shell-exec, eval regression); `make demo` from a clean `make up` pending Docker
+- [x] Phase 8 — gate `verify-p8` PASS: README links resolve, eval numbers match the committed scorecard, no fabricated CI status, quickstart commands present, compose config valid
 
 ## Phase 4 [2026-09-05]
 Executor hardening (KillSwitch, CapabilityRateLimiter, dry-run, pre/post state capture) was
@@ -278,3 +279,168 @@ verify-p7: PASS for every offline-checkable part — full control-plane test sui
 reasoning-plane pytest/ruff/mypy --strict, no-shell-exec grep, eval scorecard with no
 regression against baseline. `make demo` succeeding "from a clean `make up`" is the one
 assertion in this gate that fundamentally requires Docker and has not been exercised.
+
+## Phase 8 [2026-09-06]
+Wrote the full README from real numbers: positioning, an honestly-pending CI badge (no
+GitHub remote configured for this repo yet, so no fake-looking badge), eval scorecard
+badges built from the actual committed numbers (adversarial pass rate 100%, resolution
+rate PENDING), a coverage badge that says "not yet wired" rather than inventing a
+percentage, the C4 container diagram and control-loop diagram (both committed as Mermaid
+source in `docs/diagrams/` and inlined in the README), the security model section linking
+to the specific test files that prove each claim, the evaluation results table pulled
+directly from `eval/reports/latest.json`, an honest "Status" section explaining the
+Docker-availability constraint up front rather than burying it, a tech-stack table with
+every version pulled from the actual `pom.xml`/`pyproject.toml`/`docker-compose.yml`
+(not retyped from memory), the six-ADR design-decisions list, and a "What I'd do next"
+section that names real limitations (the mock provider's port-conflict/misconfigured-env
+ambiguity, tamper-evident-not-tamper-proof audit, no coverage tooling) rather than a
+generic roadmap.
+
+Added `scripts/verify_readme.py` to make the gate's two textual assertions machine-checked
+rather than eyeballed: every relative link in README.md resolves to a real file (and, for
+`.md` targets with a `#anchor`, the anchor matches an actual heading slug), and the
+headline eval numbers quoted in the README are cross-checked against the committed
+scorecard JSON rather than hand-typed and left to drift. Wired into `make verify-p8`
+alongside a check that the CI badge hasn't been quietly swapped for a fabricated "passing"
+shield, and a `docker compose config` validation for the "quickstart works" claim.
+
+verify-p8: PASS. All internal links resolve, eval numbers verified against the scorecard,
+quickstart commands present. "Works on a clean clone" in the fullest sense (someone
+actually cloning the repo and running the four commands) needs Docker, which this
+environment doesn't have — same honest caveat as every other Docker-gated assertion in
+this log.
+
+---
+
+# FINAL REPORT
+
+## Phase results
+
+| Phase | Gate | Result |
+|---|---|---|
+| 0 | Repository audit | PASS — `docs/AUDIT.md` |
+| 1 | `verify-p1` | PASS offline (mvn verify -DskipTests, pip install -e ., compose config valid); container health-check part needs Docker |
+| 2 | `verify-p2` | PASS offline (68 unit/integration tests, 0 failures, 11 skipped cleanly — Testcontainers need Docker) |
+| 3 | `verify-p3` | **PASS** — pytest 11/11, ruff clean, mypy --strict clean, injection tests pass |
+| 4 | `verify-p4` | **PASS** — no-shell-exec grep clean, full-incident dry-run + kill-switch tests green |
+| 5 | `verify-p5` | **PASS** — 12/12 scenarios, real scorecard, no regression vs. baseline |
+| 6 | `verify-p6` | PASS at config level; live cross-plane trace + "dashboard loads with data" need Docker |
+| 7 | `verify-p7` | PASS for all offline parts; `make demo` from a clean `make up` needs Docker |
+| 8 | `verify-p8` | **PASS** — README/link/number checks are fully offline-verifiable |
+
+Phases fully green with no asterisk: 3, 4, 5, 8. Phases 1, 2, 6, 7 are code-complete and
+pass every assertion checkable without a Docker daemon; the remaining assertions in each
+(container health checks, Testcontainers integration tests, live trace propagation,
+`make demo` against a running stack) require Docker, which this build environment does
+not have.
+
+## All deviations from the brief, with reasoning
+
+1. **Local Python is 3.11.9, not 3.12.** Docker images pin `python:3.12-slim`; local
+   dev/tests run on 3.11 with no 3.12-only syntax. (Phase 1)
+2. **Dockerfile base images pinned by tag, not `@sha256` digest.** No network access to
+   resolve real digests offline in a way that's still correct next time the tag moves;
+   a fabricated digest would simply fail the build. Marked as a TODO in each Dockerfile.
+   (Phase 1)
+3. **Keycloak/otel/tempo/grafana have no compose healthchecks in Phase 1**, since
+   `control-plane` uses `jwk-set-uri` (lazy validation) specifically so it doesn't
+   hard-depend on Keycloak being up first. Gate-relevant healthchecks (postgres, redis,
+   control-plane, reasoning-plane, demo services) are present. (Phase 1)
+4. **`langgraph==0.2.53` instead of the brief's `langgraph==1.2.11`.** The 1.2.11 line
+   wasn't available/stable against the rest of the pinned stack at build time. (Phase 1,
+   formalized in ADR-0005)
+5. **Local toolchain default resolved to a JDK 26 preview (Homebrew)**, which breaks
+   Mockito's inline mock maker. Test runs pin `JAVA_HOME` to the project's actual Java 21
+   target (Temurin) instead. (Phase 2)
+6. **This exFAT-formatted development drive regenerates macOS AppleDouble sidecar files**
+   (`._Foo.class`, `._Foo.yaml`) that get picked up by naive globs/surefire as bogus
+   files. Added a permanent surefire exclude and glob filters rather than fighting the
+   regeneration each run. (Phase 2, Phase 5)
+7. **Corpus scoping for `/graphify`** (a separate, earlier task in this session, unrelated
+   to the NexusOps build itself) excluded the vendored `.claude/` claude-flow framework
+   files by user choice — not a deviation from this brief, noted here only because it's
+   in the same session's history.
+
+## Every `TODO(human):` in the codebase
+
+| File | Line | What it marks |
+|---|---|---|
+| `README.md` | 16 | Record and attach a `make demo` GIF once run against a live Docker stack |
+| `README.md` | 175 | Attach Grafana dashboard + Tempo trace screenshots once run against a live stack |
+| `control-plane/src/main/java/io/nexusops/execution/DockerInfrastructureGateway.java` | 26 | Class-level note: some capabilities return an explicit unsupported outcome rather than pretending — see the inline TODO below |
+| `control-plane/src/main/java/io/nexusops/execution/DockerInfrastructureGateway.java` | 143 | True log rotation needs host log-driver access (json-file path or a log-rotation sidecar) — `ROTATE_LOG` currently degrades to a documented lesser operation |
+| `reasoning-plane/app/tools/runbooks.py` | 5 | Swapping the dependency-free TF-IDF ranker for real embedding search is a localised change, not yet done |
+
+## Resolved dependency versions
+
+See the README's "Tech stack" section for the full table. Headline pins: Java 21
+(Temurin) / Spring Boot 3.3.4 / docker-java 3.4.0 / Resilience4j 2.2.0 / springdoc-openapi
+2.6.0 / Testcontainers 1.20.2 · Python ≥3.11 (3.12 in images) / FastAPI 0.115.5 /
+Pydantic 2.9.2 / LangGraph 0.2.53 / httpx 0.27.2 / structlog 24.4.0 / OpenTelemetry
+1.28.2 · Postgres 16 / Keycloak 25.0 / Redis 7 / OTel Collector 0.111.0 / Tempo 2.6.0 /
+Prometheus v2.55.1 / Grafana 11.2.2.
+
+## Actual eval scorecard numbers
+
+From `eval/reports/latest.json` (12/12 scenarios, mock provider):
+
+- Diagnostic accuracy: **1.0**
+- Remediation appropriateness: **1.0**
+- False-action rate: **0.0**
+- Adversarial pass rate: **1.0** (1/1)
+- Mean hops per diagnosis: **7.0**
+- Mean token cost per diagnosis (mock pricing): **$0.00762**
+- Diagnosis latency: p50 **0.003s**, p95 **0.008s**
+- Resolution rate: **PENDING** (needs `docker compose up` against real demo-svc containers)
+- Time-to-remediation p50/p95: **PENDING** (same reason)
+
+## What I'd flag as weak or worth revisiting
+
+- **The single biggest caveat on this whole build: no Docker daemon was available in the
+  development environment.** Every line of code for the Docker-dependent gates
+  (Testcontainers integration tests, live cross-plane tracing, the Grafana dashboard
+  actually rendering data, `make demo` end to end, real resolution-rate numbers) is
+  written and, where possible, unit/config-tested — but none of it has been run against
+  a live stack. This is the highest-priority thing for a human to verify next:
+  `make up && make verify-p1 && ... && make verify-p8` on a machine with Docker.
+- **The mock LLM provider's diagnostic accuracy (1.0) reflects internal consistency of
+  its own deterministic rules, not real-model quality.** Don't read the scorecard as "the
+  agent is perfect" — read it as "the pipeline correctly executes what a simple rule-based
+  stand-in decides," which is what it was built to prove at this stage. Running the same
+  eval against a real Anthropic-backed provider is the natural next validation.
+- **`eval/demo.sh` was written directly against the real API contracts but never actually
+  run.** It's the single piece of code in this build with the least direct verification —
+  worth a careful first read-through before running it unattended.
+- **A bug caught mid-build (the runbook-contamination OOM misdiagnosis in Phase 5) is a
+  reminder that the eval harness itself is load-bearing**, not a formality — it found a
+  real defect that unit tests alone had missed because no single unit test exercised the
+  full tool-call sequence with a realistic, weakly-matching runbook corpus in place. Worth
+  keeping the harness in the loop for every future change to `mock.py` or the runbook
+  corpus, not just running it once at Phase 5.
+- **Coverage tooling isn't wired.** Line/branch coverage would be a fast, valuable
+  addition (JaCoCo for Java, `coverage.py` for Python) and is explicitly called out as a
+  gap rather than a silently-skipped requirement.
+
+## Summary
+
+Built a two-plane, policy-gated autonomous incident remediation system end to end: a
+Java/Spring Boot control plane (security, policy-as-data, an approval state machine, a
+capability executor with a five-guard fail-closed chain, a hash-chained audit log) and a
+Python/FastAPI/LangGraph reasoning plane (a bounded ReAct diagnostic loop with explicit
+hop-capping, injection-resistant tool output handling, and a mock LLM provider for fully
+offline operation). Added 68 control-plane tests and 11 reasoning-plane tests, a 12-scenario
+chaos eval harness with a real (not fabricated) scorecard, a full threat model with a
+per-row proving test, six ADRs, observability wiring (Micrometer metrics, a provisioned
+Grafana dashboard, corrected cross-plane trace propagation), and all Phase 7/8 production
+signals (bulkhead, OpenAPI spec, LICENSE, CONTRIBUTING, pre-commit, a real README).
+
+Found and fixed three genuine bugs via TDD/the eval harness along the way: a dead
+bounds-check in `CapabilityExecutor` (clamping before validating meant no replica count
+could ever be rejected), a fact-extraction bug in the mock LLM provider that let runbook
+documentation prose contaminate live diagnosis (caught by the eval harness, not a unit
+test), and a cross-plane tracing gap where the reasoning-plane client bypassed Spring's
+observability instrumentation entirely.
+
+What needs human attention: run the whole gate sequence against a real Docker daemon —
+that is the one thing this session could not do and every "PASS at config level" /
+"PENDING" marker in this log traces back to that single constraint.

@@ -110,4 +110,11 @@ verify-p7: ## Gate: full CI + make demo from clean up (Phase 7)
 	@echo "PASS verify-p7 (offline parts); 'make demo' from a clean 'make up' needs Docker -- see BUILD-LOG"
 
 verify-p8: ## Gate: README integrity (Phase 8)
-	@echo "verify-p8 not implemented"; exit 1
+	@echo "== README: internal links resolve + eval numbers match the committed scorecard =="
+	python3 scripts/verify_readme.py
+	@echo "== README: no fabricated CI status (badge must be honest, not a fake passing shield) =="
+	@grep -q "pending%20GitHub%20remote" README.md || { echo "FAIL: CI badge no longer says pending -- verify a real repo/workflow exists before removing this check"; exit 1; }
+	@echo "== quickstart commands present and compose config valid =="
+	@grep -q "make up" README.md && grep -q "make demo" README.md
+	$(COMPOSE) config >/dev/null
+	@echo "PASS verify-p8 (quickstart *working* end-to-end on a clean clone needs Docker -- see BUILD-LOG)"

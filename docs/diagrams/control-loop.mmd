@@ -1,0 +1,27 @@
+%% The self-healing control loop. Every arrow is an audited state transition.
+graph LR
+    DETECT["DETECT<br/>health/metric watcher<br/>→ Incident"]
+    DIAGNOSE["DIAGNOSE<br/>LangGraph ReAct agent<br/>read-only tools<br/>→ hypothesis + evidence"]
+    PLAN["PLAN<br/>typed RemediationPlan<br/>(structured output)"]
+    GATE["GATE<br/>policy engine<br/>→ AUTO_APPROVE / REQUIRE_HUMAN / DENY"]
+    APPROVE["APPROVE<br/>human (if required)<br/>subject = JWT, non-repudiable"]
+    EXECUTE["EXECUTE<br/>capability executor<br/>allowlisted typed actions only"]
+    VERIFY["VERIFY<br/>re-check the original signal<br/>→ RESOLVED / NOT_RESOLVED"]
+    ESCALATE["ESCALATE<br/>on failure, denial, or hop cap<br/>→ human, full trace attached"]
+    AUDIT[("AUDIT<br/>hash-chained, append-only<br/>every transition")]
+
+    DETECT --> DIAGNOSE --> PLAN --> GATE
+    GATE -- AUTO_APPROVE --> EXECUTE
+    GATE -- REQUIRE_HUMAN --> APPROVE --> EXECUTE
+    GATE -- DENY --> ESCALATE
+    EXECUTE --> VERIFY
+    VERIFY -- RESOLVED --> AUDIT
+    VERIFY -- NOT_RESOLVED --> ESCALATE
+    ESCALATE --> AUDIT
+
+    DETECT -.-> AUDIT
+    DIAGNOSE -.-> AUDIT
+    PLAN -.-> AUDIT
+    GATE -.-> AUDIT
+    APPROVE -.-> AUDIT
+    EXECUTE -.-> AUDIT

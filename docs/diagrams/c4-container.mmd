@@ -1,0 +1,40 @@
+%% C4 Container diagram — NexusOps two-plane architecture and trust boundary.
+%% Render: https://mermaid.live, or GitHub renders .mmd/mermaid fences natively.
+graph TB
+    operator["Operator / Approver<br/>(human)"]
+
+    subgraph trust["Trust boundary"]
+        subgraph cp["Control Plane (Java 21 / Spring Boot 3)"]
+            api["REST API<br/>Incident / Approval / Audit / Admin"]
+            policy["Policy Engine<br/>(policy-as-data)"]
+            approval["Approval State Machine"]
+            executor["Capability Executor<br/>(closed ActionType enum)"]
+            audit["Hash-chained Audit Log"]
+        end
+
+        infra[("Docker Engine<br/>(demo target services)")]
+        db[("Postgres<br/>control-plane schema")]
+        idp["Keycloak<br/>(OAuth2 / JWT)"]
+    end
+
+    subgraph rp["Reasoning Plane (Python 3.12 / FastAPI / LangGraph)"]
+        graph["ReAct Diagnostic Graph<br/>triage → investigate → synthesise → validate"]
+        tools["Read-only Tools<br/>(status, logs, metrics, deploys, deps, runbooks)"]
+    end
+
+    demo["Demo target services<br/>payment-svc / inventory-svc / gateway / worker"]
+
+    operator -- "HTTPS + JWT" --> api
+    api --> policy --> approval --> executor
+    executor -- "typed Docker API calls only<br/>(no shell, no exec)" --> infra
+    executor --> audit
+    api -- "JWT (client-credentials)" --> idp
+    api --> db
+    infra --> demo
+
+    api -- "POST /diagnose<br/>(RemediationPlan out)" --> rp
+    graph --> tools
+    tools -- "read-only HTTP<br/>/status /logs /metrics-json" --> demo
+
+    classDef untrusted fill:#fee,stroke:#c00;
+    class rp untrusted;

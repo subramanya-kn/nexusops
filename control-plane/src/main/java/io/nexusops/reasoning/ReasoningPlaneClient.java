@@ -28,9 +28,18 @@ public class ReasoningPlaneClient {
 
     private final RestClient client;
 
-    public ReasoningPlaneClient(@Value("${nexusops.reasoning.base-url:http://localhost:8000}")
+    /**
+     * {@code builder} MUST be the Spring-managed {@link RestClient.Builder} bean, not a
+     * bare {@code RestClient.builder()} — the managed builder is what Spring Boot's
+     * observability autoconfiguration instruments with an {@code ObservationRegistry},
+     * which is what makes the W3C {@code traceparent} header propagate to the reasoning
+     * plane. A manually constructed client silently opts out of that instrumentation, and
+     * the promised "one trace spans both planes" property would quietly stop being true.
+     */
+    public ReasoningPlaneClient(RestClient.Builder builder,
+                                @Value("${nexusops.reasoning.base-url:http://localhost:8000}")
                                 String baseUrl) {
-        this.client = RestClient.builder().baseUrl(baseUrl).build();
+        this.client = builder.baseUrl(baseUrl).build();
     }
 
     @CircuitBreaker(name = "reasoning", fallbackMethod = "fallback")

@@ -2,6 +2,7 @@ package io.nexusops.policy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,15 +30,18 @@ public class PolicyEngine {
 
     private final ResourceLoader resourceLoader;
     private final RiskScorer riskScorer;
+    private final MeterRegistry metrics;
     private final String rulesLocation;
     private volatile PolicyRuleSet ruleSet;
 
     public PolicyEngine(ResourceLoader resourceLoader,
                         RiskScorer riskScorer,
+                        MeterRegistry metrics,
                         @Value("${nexusops.policy.rules-location:classpath:policy-rules.yaml}")
                         String rulesLocation) {
         this.resourceLoader = resourceLoader;
         this.riskScorer = riskScorer;
+        this.metrics = metrics;
         this.rulesLocation = rulesLocation;
     }
 
@@ -72,9 +76,11 @@ public class PolicyEngine {
 
         if (winner == null) {
             winner = ruleSet.defaultDecision();
+            metrics.counter("nexusops.policy.decisions", "decision", winner.name()).increment();
             return new PolicyResult(winner, List.of(), risk,
                     "no rule matched; applied default " + winner);
         }
+        metrics.counter("nexusops.policy.decisions", "decision", winner.name()).increment();
         return new PolicyResult(winner, fired, risk,
                 "decision " + winner + " from rules " + fired);
     }

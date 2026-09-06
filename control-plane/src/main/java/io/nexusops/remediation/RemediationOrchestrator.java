@@ -13,6 +13,7 @@ import io.nexusops.incident.IncidentEntity;
 import io.nexusops.incident.IncidentRepository;
 import io.nexusops.incident.IncidentService;
 import io.nexusops.incident.IncidentStatus;
+import io.nexusops.observability.CorrelationIdContext;
 import io.nexusops.policy.PolicyContext;
 import io.nexusops.policy.PolicyDecision;
 import io.nexusops.policy.PolicyEngine;
@@ -91,6 +92,13 @@ public class RemediationOrchestrator {
     @Transactional
     public ApprovalRecordEntity diagnoseAndGate(String incidentId, boolean dryRun) {
         IncidentEntity incident = incidentService.get(incidentId);
+        try (var ignored = CorrelationIdContext.open(incident.getCorrelationId())) {
+            return doDiagnoseAndGate(incident, dryRun);
+        }
+    }
+
+    private ApprovalRecordEntity doDiagnoseAndGate(IncidentEntity incident, boolean dryRun) {
+        String incidentId = incident.getId();
         incident.transitionTo(IncidentStatus.DIAGNOSING);
         incidentRepository.save(incident);
 
@@ -143,6 +151,13 @@ public class RemediationOrchestrator {
     @Transactional
     public void executeApproved(String approvalId, boolean dryRun) {
         ApprovalRecordEntity approval = approvalService.get(approvalId);
+        try (var ignored = CorrelationIdContext.open(approval.getCorrelationId())) {
+            doExecuteApproved(approval, dryRun);
+        }
+    }
+
+    private void doExecuteApproved(ApprovalRecordEntity approval, boolean dryRun) {
+        String approvalId = approval.getId();
         if (approval.getState() != ApprovalState.APPROVED) {
             throw new IllegalStateException("approval not in APPROVED state: " + approval.getState());
         }

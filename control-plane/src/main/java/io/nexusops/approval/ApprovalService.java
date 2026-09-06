@@ -1,5 +1,6 @@
 package io.nexusops.approval;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.nexusops.audit.AuditService;
 import io.nexusops.common.Json;
 import io.nexusops.policy.PolicyDecision;
@@ -29,13 +30,16 @@ public class ApprovalService {
 
     private final ApprovalRecordRepository repository;
     private final AuditService audit;
+    private final MeterRegistry metrics;
     private final Duration approvalTtl;
 
     public ApprovalService(ApprovalRecordRepository repository,
                            AuditService audit,
+                           MeterRegistry metrics,
                            @Value("${nexusops.approval.ttl-seconds:900}") long ttlSeconds) {
         this.repository = repository;
         this.audit = audit;
+        this.metrics = metrics;
         this.approvalTtl = Duration.ofSeconds(ttlSeconds);
     }
 
@@ -65,6 +69,7 @@ public class ApprovalService {
                 record.recordApprover("system:auto-approve");
                 record.setDetail("auto-approved by policy: " + policy.firedRuleIds());
                 auditState(record, "APPROVAL_AUTO_APPROVED", "system:policy");
+                recordDecisionMetrics(record, "auto");
             }
             case REQUIRE_HUMAN -> {
                 record.transitionTo(ApprovalState.PENDING_APPROVAL);
@@ -77,6 +82,7 @@ public class ApprovalService {
                 record.setDetail("denied by policy: " + policy.firedRuleIds());
                 auditState(record, "APPROVAL_DENIED", "system:policy");
                 record.transitionTo(ApprovalState.CLOSED);
+                recordDecisionMetrics(record, "auto");
             }
             default -> throw new IllegalStateException("unhandled decision " + policy.decision());
         }
@@ -91,6 +97,7 @@ public class ApprovalService {
         record.recordApprover(subject);
         record.setDetail("approved by " + subject);
         auditState(record, "APPROVAL_APPROVED", subject);
+        recordDecisionMetrics(record, "human");
         return repository.save(record);
     }
 
@@ -102,7 +109,23 @@ public class ApprovalService {
         record.setDetail("rejected by " + subject);
         auditState(record, "APPROVAL_REJECTED", subject);
         record.transitionTo(ApprovalState.CLOSED);
+        recordDecisionMetrics(record, "human");
         return repository.save(record);
+    }
+
+    /**
+     * Feeds the "approval latency" and "policy decisions" Grafana panels: how long the
+     * record sat between creation and this terminal decision, tagged by whether policy
+     * decided alone ({@code auto}) or a human acted ({@code human}).
+     */
+    private void recordDecisionMetrics(ApprovalRecordEntity record, String mode) {
+        Duration latency = Duration.between(record.getCreatedAt(), Instant.now());
+        metrics.timer("nexusops.approval.latency",
+                        "state", record.getState().name(), "mode", mode)
+                .record(latency);
+        metrics.counter("nexusops.approval.outcomes",
+                        "state", record.getState().name(), "mode", mode)
+                .increment();
     }
 
     @Transactional
@@ -124,6 +147,7 @@ public class ApprovalService {
             record.setDetail("expired without approval");
             auditState(record, "APPROVAL_EXPIRED", "system:sweeper");
             record.transitionTo(ApprovalState.CLOSED);
+            recordDecisionMetrics(record, "expired");
             repository.save(record);
             log.info("Expired stale approval {}", record.getId());
         }

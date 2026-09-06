@@ -1,5 +1,6 @@
 package io.nexusops.policy;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.nexusops.incident.Environment;
 import io.nexusops.remediation.ActionType;
 import io.nexusops.remediation.BlastRadius;
@@ -26,7 +27,7 @@ class PolicyEngineTest {
     @BeforeEach
     void setUp() {
         engine = new PolicyEngine(new DefaultResourceLoader(), new RiskScorer(),
-                "classpath:policy-rules.yaml");
+                new SimpleMeterRegistry(), "classpath:policy-rules.yaml");
         engine.load();
     }
 

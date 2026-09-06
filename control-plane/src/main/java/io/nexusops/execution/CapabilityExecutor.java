@@ -1,5 +1,6 @@
 package io.nexusops.execution;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.nexusops.audit.AuditService;
 import io.nexusops.common.Json;
 import io.nexusops.registry.ServiceRegistry;
@@ -39,6 +40,7 @@ public class CapabilityExecutor {
     private final CapabilityRateLimiter rateLimiter;
     private final ExecutionRecordRepository executions;
     private final AuditService audit;
+    private final MeterRegistry metrics;
     private final int maxReplicas;
 
     public CapabilityExecutor(InfrastructureGateway gateway,
@@ -47,6 +49,7 @@ public class CapabilityExecutor {
                               CapabilityRateLimiter rateLimiter,
                               ExecutionRecordRepository executions,
                               AuditService audit,
+                              MeterRegistry metrics,
                               @Value("${nexusops.execution.max-replicas:5}") int maxReplicas) {
         this.gateway = gateway;
         this.registry = registry;
@@ -54,6 +57,7 @@ public class CapabilityExecutor {
         this.rateLimiter = rateLimiter;
         this.executions = executions;
         this.audit = audit;
+        this.metrics = metrics;
         this.maxReplicas = maxReplicas;
     }
 
@@ -184,6 +188,7 @@ public class CapabilityExecutor {
                 UUID.randomUUID().toString(), executionKey, incidentId, action.type(),
                 action.targetRef(), dryRun, status, intendedOp, preState, postState, detail);
         ExecutionRecordEntity saved = executions.save(entity);
+        metrics.counter("nexusops.execution.outcomes", "status", status.name()).increment();
         audit.append(incidentId, correlationId, auditEvent, Map.of(
                 "executionId", saved.getId(),
                 "executionKey", executionKey,

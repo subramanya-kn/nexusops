@@ -1,5 +1,6 @@
 package io.nexusops.verification;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.nexusops.audit.AuditService;
 import io.nexusops.registry.HealthProbe;
 import io.nexusops.registry.RegistryProperties.ServiceDescriptor;
@@ -26,13 +27,16 @@ public class Verifier {
     private final HealthProbe healthProbe;
     private final VerificationResultRepository repository;
     private final AuditService audit;
+    private final MeterRegistry metrics;
 
     public Verifier(ServiceRegistry registry, HealthProbe healthProbe,
-                    VerificationResultRepository repository, AuditService audit) {
+                    VerificationResultRepository repository, AuditService audit,
+                    MeterRegistry metrics) {
         this.registry = registry;
         this.healthProbe = healthProbe;
         this.repository = repository;
         this.audit = audit;
+        this.metrics = metrics;
     }
 
     @Transactional
@@ -47,6 +51,8 @@ public class Verifier {
                 : "signal persists: " + serviceRef + " unhealthy";
         VerificationResultEntity result = repository.save(new VerificationResultEntity(
                 UUID.randomUUID().toString(), incidentId, executionId, resolved, detail));
+        metrics.counter("nexusops.verification.outcomes", "resolved", String.valueOf(resolved))
+                .increment();
         audit.append(incidentId, correlationId, "VERIFICATION", Map.of(
                 "verificationId", result.getId(),
                 "resolved", resolved,

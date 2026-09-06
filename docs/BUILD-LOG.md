@@ -81,6 +81,7 @@ inside `target/`, which surefire was picking up as bogus test classes. Added a p
 - [x] Phase 3 — gate: `verify-p3` PASS — pytest 11/11, ruff clean, mypy --strict clean (28 files), injection tests pass, mock diagnosis schema-valid
 - [x] Phase 4 — gate `verify-p4` PASS: no-shell-exec grep clean, RemediationOrchestratorTest (full incident dry-run e2e) + kill-switch tests green
 - [x] Phase 5 — gate `verify-p5` PASS: 12/12 scenarios, real scorecard numbers, no regression vs committed baseline
+- [~] Phase 6 — gate `verify-p6` PASS at config level (dashboard JSON valid, compose wiring valid, CP tests green); live trace-across-services + "dashboard loads with data" pending Docker
 
 ## Phase 4 [2026-09-05]
 Executor hardening (KillSwitch, CapabilityRateLimiter, dry-run, pre/post state capture) was
@@ -157,3 +158,53 @@ mean_hops=7.0, mean_token_cost_usd=0.00762, diagnosis_latency_p50=0.003s/p95=0.0
 a plan against real infrastructure (the demo-svc containers) and re-checking health, which
 needs `docker compose up`. Not fabricated per invariant #6; `make eval-live` (Phase 6/7,
 once Docker is available) will fill these in against the real stack.
+
+## Phase 6 [2026-09-06]
+Found and fixed a real gap while implementing this phase, not just wiring dashboards:
+`ReasoningPlaneClient` built its `RestClient` via the bare static `RestClient.builder()`
+instead of the Spring-managed `RestClient.Builder` bean. Only the managed builder bean is
+instrumented by Spring Boot's observability autoconfiguration (the `ObservationRegistry`
+that attaches the W3C `traceparent` header via the OTel propagator) — the manually
+constructed client silently opted out, so the promised "one trace spans both planes"
+property would have quietly been false even though every other tracing dependency was
+correctly declared. Fixed by constructor-injecting `RestClient.Builder`.
+
+Added `CorrelationIdContext` (try-with-resources MDC helper, restores rather than clears
+the previous value so nested calls are safe) and wired it into `IncidentService.create()`,
+`RemediationOrchestrator.diagnoseAndGate()`, and `.executeApproved()` — `logback-spring.xml`
+already declared `correlationId`/`traceId`/`spanId` as MDC keys to include in JSON logs, but
+nothing had ever actually populated `correlationId`. `traceId`/`spanId` are populated
+automatically by `micrometer-tracing-bridge-otel`, already on the classpath. Added
+`CorrelationIdContextTest` (put/close, and nested-context restore-not-clear).
+
+Added real Micrometer instrumentation feeding the dashboard: `nexusops.policy.decisions`
+(PolicyEngine, tagged by decision), `nexusops.execution.outcomes` (CapabilityExecutor,
+tagged by status), `nexusops.verification.outcomes` (Verifier, tagged by resolved),
+`nexusops.approval.latency` + `nexusops.approval.outcomes` (ApprovalService, tagged by
+state/mode=auto|human|expired), and `nexusops.incidents.by_state` (new
+`IncidentStateMetrics` gauge, one per `IncidentStatus`, evaluated live from
+`IncidentRepository.countByStatus` at scrape time — added that repository method). All
+exposed via the already-present `/actuator/prometheus` (micrometer-registry-prometheus was
+on the classpath from Phase 1 but nothing had been instrumented against it yet).
+
+Reasoning-plane had no metrics endpoint at all. Added a small dependency-free Prometheus
+text exporter (`app/observability/metrics.py`) rather than pulling in a new library for
+four counters — `nexusops_diagnoses_total`, `_escalated_total`, `_hops_sum`,
+`_tokens_sum{kind}`, `_cost_usd_sum`, `_actions_total{action_type}` — wired into
+`/metrics` and recorded after every `/diagnose` call. Smoke-tested via FastAPI TestClient:
+valid Prometheus exposition format, correct values after a recorded diagnosis.
+
+Added `prometheus` service to compose (scraping both `control-plane:8080/actuator/prometheus`
+and `reasoning-plane:8000/metrics`) and a Prometheus datasource alongside the existing Tempo
+one in Grafana's provisioning. Wrote and committed `deploy/grafana/dashboards/
+nexusops-overview.json` (8 panels: incidents by state, policy decisions by outcome, a
+trace-explorer text panel explaining the Tempo lookup, approval latency, execution success
+rate, verification pass rate, tokens/cost per incident, agent hops per incident) and the
+dashboard-provisioning YAML so `make up` yields a working dashboard with zero manual setup.
+
+verify-p6: PASS at the config level (dashboard JSON parses, `docker compose config` is
+valid with the new services/mounts, control-plane tests green after the metrics
+instrumentation). The two live assertions in the actual gate — a single trace ID pulling
+spans from both services, and the dashboard loading with real data — require `docker
+compose up` and `make demo`, which need Docker; this environment doesn't have it running.
+Everything that can be verified without a Docker daemon has been.

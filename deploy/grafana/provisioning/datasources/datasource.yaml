@@ -1,0 +1,25 @@
+# Provisioned datasources -- `make up` yields working Tempo + Prometheus datasources,
+# zero manual setup.
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: false
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: ""
+      nodeGraph:
+        enabled: true
+
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

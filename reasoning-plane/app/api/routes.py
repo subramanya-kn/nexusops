@@ -9,10 +9,12 @@ import asyncio
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from app.api.ratelimit import RateLimiter
 from app.config import settings
+from app.observability.metrics import metrics
 from app.schemas.plan import DiagnosisRequest, RemediationPlan
 from app.service import DiagnosisService
 
@@ -49,6 +51,11 @@ async def info() -> dict[str, object]:
     }
 
 
+@router.get("/metrics")
+async def metrics_endpoint() -> PlainTextResponse:
+    return PlainTextResponse(metrics.render_prometheus(), media_type="text/plain; version=0.0.4")
+
+
 @router.post("/diagnose", response_model=DiagnoseResponse)
 async def diagnose(
     request: Request,
@@ -61,6 +68,7 @@ async def diagnose(
 
     # Offload the (sync) graph run to a thread so the event loop stays responsive.
     plan, cost = await asyncio.to_thread(service.diagnose, body)
+    metrics.record(plan, cost)
     log.info(
         "diagnosis.complete",
         incident_id=body.incident_id,

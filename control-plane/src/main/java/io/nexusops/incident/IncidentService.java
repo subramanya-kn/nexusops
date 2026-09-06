@@ -1,6 +1,7 @@
 package io.nexusops.incident;
 
 import io.nexusops.audit.AuditService;
+import io.nexusops.observability.CorrelationIdContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,13 @@ public class IncidentService {
     public IncidentEntity create(String serviceRef, Environment environment, String signal) {
         String id = UUID.randomUUID().toString();
         String correlationId = "corr-" + UUID.randomUUID();
+        try (var ignored = CorrelationIdContext.open(correlationId)) {
+            return doCreate(id, correlationId, serviceRef, environment, signal);
+        }
+    }
+
+    private IncidentEntity doCreate(String id, String correlationId, String serviceRef,
+                                    Environment environment, String signal) {
         IncidentEntity incident = new IncidentEntity(id, correlationId, serviceRef, environment, signal);
         repository.save(incident);
         audit.append(id, correlationId, "INCIDENT_DETECTED", Map.of(

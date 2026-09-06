@@ -1,0 +1,13 @@
+# Points Grafana at the committed dashboard JSON below -- `make up` yields a working
+# dashboard with zero manual setup, per Phase 6 gate.
+apiVersion: 1
+
+providers:
+  - name: nexusops
+    orgId: 1
+    folder: NexusOps
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

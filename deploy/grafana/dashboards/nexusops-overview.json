@@ -1,0 +1,128 @@
+{
+  "title": "NexusOps Overview",
+  "uid": "nexusops-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Incidents by state",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "nexusops_incidents_by_state",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "options": { "displayMode": "gradient", "orientation": "horizontal" }
+    },
+    {
+      "id": 2,
+      "title": "Policy decisions by outcome",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (decision) (nexusops_policy_decisions_total)",
+          "legendFormat": "{{decision}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Trace explorer (Java → Python)",
+      "type": "text",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "### One trace, both planes\n\nOpen **Explore → Tempo** and search by `service.name=control-plane` or `service.name=reasoning-plane`. A single incident's trace ID retrieves spans from both services: incident detected → diagnosis requested → every LangGraph node/tool call → plan returned → policy evaluated → approval → execution → verification.\n\nPropagation: `ReasoningPlaneClient` uses the Spring-managed `RestClient.Builder` bean (not a bare `RestClient.builder()`) so the W3C `traceparent` header is attached automatically; `FastAPIInstrumentor` on the Python side extracts it and continues the trace."
+      }
+    },
+    {
+      "id": 4,
+      "title": "Approval latency (avg, by state/mode)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (state, mode) (nexusops_approval_latency_seconds_sum) / sum by (state, mode) (nexusops_approval_latency_seconds_count)",
+          "legendFormat": "{{state}} ({{mode}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "Execution success rate",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(nexusops_execution_outcomes_total{status=\"SUCCEEDED\"}) / sum(nexusops_execution_outcomes_total)",
+          "legendFormat": "success rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "Verification pass rate",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(nexusops_verification_outcomes_total{resolved=\"true\"}) / sum(nexusops_verification_outcomes_total)",
+          "legendFormat": "pass rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "title": "Tokens / cost per incident (reasoning plane)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "nexusops_diagnosis_cost_usd_sum / nexusops_diagnoses_total",
+          "legendFormat": "avg cost (USD)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (kind) (nexusops_diagnosis_tokens_sum) / nexusops_diagnoses_total",
+          "legendFormat": "avg tokens ({{kind}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Agent hops per incident (reasoning plane)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "nexusops_diagnosis_hops_sum / nexusops_diagnoses_total",
+          "legendFormat": "avg hops",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

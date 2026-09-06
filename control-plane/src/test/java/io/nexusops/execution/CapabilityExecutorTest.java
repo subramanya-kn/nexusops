@@ -1,5 +1,6 @@
 package io.nexusops.execution;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.nexusops.audit.AuditService;
 import io.nexusops.registry.ServiceRegistry;
 import io.nexusops.remediation.ActionType;
@@ -46,7 +47,7 @@ class CapabilityExecutorTest {
         killSwitch = new KillSwitch();
         rateLimiter = new CapabilityRateLimiter(10, 3600);
         executor = new CapabilityExecutor(gateway, registry, killSwitch, rateLimiter,
-                executions, audit, 5);
+                executions, audit, new SimpleMeterRegistry(), 5);
         lenient().when(executions.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -117,7 +118,7 @@ class CapabilityExecutorTest {
     void rateLimitBlocksAfterWindowSaturates() {
         CapabilityRateLimiter tightLimiter = new CapabilityRateLimiter(1, 3600);
         CapabilityExecutor tightExecutor = new CapabilityExecutor(gateway, registry, killSwitch,
-                tightLimiter, executions, audit, 5);
+                tightLimiter, executions, audit, new SimpleMeterRegistry(), 5);
         when(executions.findByExecutionKey(any())).thenReturn(Optional.empty());
         when(registry.exists("payment-svc")).thenReturn(true);
         when(gateway.restartContainer(any(), any()))

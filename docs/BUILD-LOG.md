@@ -377,7 +377,9 @@ by the live run below rather than a new Mockito unit test — docker-java's `Con
 model has no public setters (Jackson-only construction), and the real Docker run was about
 to happen anyway, making it the more direct and honest verification.
 
-**A6 — Docker validation run: BLOCKED by host disk exhaustion, not by the code.**
+**A6 — Docker validation run: partially completed, real bugs found and fixed, full compose
+stack still blocked on host disk space.**
+
 `docker info` initially connected fine (Docker Desktop 28.0.4, daemon reachable). `make up`
 began pulling/building images, then failed partway through:
 ```
@@ -385,26 +387,106 @@ failed commit on ref "layer-sha256:a48...": commit failed: sync failed: sync
 /var/lib/desktop-containerd/.../ingest/.../data: input/output error
 make: *** [up] Error 1
 ```
-`df -h /` showed **2.5GB free** on the host disk — insufficient for the remaining image
-layers (postgres, keycloak, otel-collector, tempo, prometheus, grafana, plus the two
-custom-built images). The Docker daemon itself crashed after the failed write and did not
-come back on its own. This is a host-disk-space constraint, not a code or exFAT issue (the
-project lives on the external exFAT drive per the existing AppleDouble note, but Docker
-Desktop's own VM disk lives on the internal boot volume, which is what's full) — freeing
-space on the user's machine is not something to do unilaterally without asking, so this
-was not attempted. Per the brief's own contingency ("if Docker is unavailable... leave
-every gate below as PENDING"), all of verify-p1/p2/p6/p7/p8's Docker-gated assertions,
-`make demo`, and `make eval-live` remain **PENDING — BLOCKED on host disk space**, not
-silently dropped. The `make eval-live` target itself (to fill in resolution_rate /
-time-to-remediation) was designed but not yet built, since there's no environment to
-prove it against yet; building it blind without being able to run it would risk exactly
-the kind of "written but never executed" gap A5 just found in `demo.sh`.
+`df -h /` showed **2.5GB free** on the host disk (still ~2.7GB as of this writing) —
+insufficient for the full compose stack's image layers (postgres, keycloak,
+otel-collector, tempo, prometheus, grafana, plus three custom-built images). The Docker
+daemon crashed after the failed write. This is a host-disk-space constraint, not a code or
+exFAT issue — freeing space on the user's machine is not something to do unilaterally, so
+it was not attempted; the user has been asked and is freeing space separately.
 
-**What would unblock this:** free disk space on the host (or point `DOCKER_HOME`/Docker
-Desktop's data at the external drive with more room) and re-run `make up && make
-verify-p1 && ... && make verify-p8 && make demo`. The A4.5 container-name-resolution fix
-should be verified first thing once Docker is available again — it's the highest-risk
-unverified change in this pass.
+The daemon recovered on its own shortly after (with the already-pulled `postgres:16` /
+`keycloak:25.0` layers still cached), which made it possible to actually run the 11
+Testcontainers integration tests for real — the first time in this project's history —
+via `mvn test` locally. **This immediately found two genuine, previously-undetectable bugs**,
+both now fixed and verified (see the commit `fix(control-plane): audit hash-chain
+timestamp bug + Testcontainers stop-on-teardown bug` and BUILD-LOG entries above/below):
+
+1. **`AuditService` hashed an untruncated-precision `Instant`**, so every row read back
+   from real Postgres (which stores microsecond, not nanosecond, precision) hashed
+   differently than at write time — `verifyChain()` reported *every* intact chain as
+   tampered, unconditionally. This directly broke the project's tamper-evident audit log,
+   the headline claim of ADR-0003. Fixed by truncating to microseconds before hashing.
+2. **`IntegrationTestBase`'s shared static Testcontainers got stopped by whichever test
+   class's teardown ran first**, leaving the next class hitting a dead Keycloak port
+   ("Connection refused" on every request) — not flakiness, a real lifecycle bug.
+   Converted to Testcontainers' singleton-container pattern.
+3. Two smaller CI-only fixes surfaced the same way: `spring.classformat.ignore=true` (the
+   exFAT AppleDouble sidecar problem regenerates continuously, not just once, so a
+   one-time delete wasn't enough) and a `.gitleaksignore` entry for one documentation
+   false-positive.
+
+All of this was verified twice: locally (`mvn -q -B test`, 75/75 pass) and for real in
+GitHub Actions on a genuine Ubuntu Docker host (`ci` workflow, run `34765349501`) — **this
+is the first time these 11 Testcontainers tests have ever passed, anywhere, in this
+project's history.**
+
+**Still PENDING — blocked on host disk space, not by any known code issue:**
+- `make up` / the full docker-compose stack (postgres + keycloak + otel-collector + tempo
+  + prometheus + grafana + all three app images running together)
+- `verify-p1` (container health-check part), `verify-p6` (live cross-plane trace + Grafana
+  dashboard actually rendering data), `verify-p7`/`make demo` (scripted end-to-end incident
+  against the live compose stack)
+- `make eval-live` — designed (see A2/A3) but not built, since there's no live stack to
+  prove it against yet; building it blind risks the same "written but never executed" gap
+  A5 found in `demo.sh`. Building it is the first thing to do once `make up` succeeds.
+- Real-provider eval (`make eval-real`) — wired (A2) but no `ANTHROPIC_API_KEY` in this
+  environment
+- The A4.5 container-name-resolution fix (compose-label-based lookup) is exercised by the
+  Testcontainers tests' Postgres/Keycloak containers implicitly, but not yet proven against
+  the actual `payment-svc`/`inventory-svc`/`gateway`/`worker` demo-svc containers via a real
+  `restartContainer` call — that needs `make up` too.
+
+**What would unblock the rest:** free disk space on the host (or point Docker Desktop's
+data at a volume with more room) and re-run `make up && make verify-p1 && make verify-p6 &&
+make verify-p7 && make demo`, then build and run `make eval-live`.
+
+---
+
+## Part B — GitHub publish [2026-09-13]
+
+**B1 — Repo hygiene.** `.gitignore` fixed to match `.claude-flow/` at any depth (was
+root-only, missing nested runtime dirs), added `graphify-out/`, `node_modules/`, `.next/`,
+IDE folders. Untracked one churny generated file
+(`control-plane/.claude-flow/data/pending-insights.jsonl`). Audited
+`git log --all --full-history -- '*.env*'`: only `.env.example` was ever committed, and it
+contains dev-only placeholder values (`nexusops`/`admin`/`admin`) matching
+`docker-compose.yml`'s own defaults — not real secrets. **PASS.**
+
+**B2/B3 — Repo created and pushed.** Public repo created via `gh repo create` and pushed:
+**https://github.com/subramanya-kn/nexusops**. Description and six topics set
+(`langgraph`, `spring-boot`, `llm-agents`, `incident-response`, `ai-safety`,
+`policy-as-code`). **PASS.**
+
+**B4 — GitHub Actions: all three workflows green.** The very first push surfaced four
+CI-only bugs that had never been executed before (this repo had no remote until this
+session):
+1. `aquasecurity/trivy-action@0.24.0` — the real tag is `v0.24.0` (with the `v`); all four
+   Trivy steps failed at action-resolution before running anything.
+2. `gitleaks/gitleaks-action@v2` diffs `github.event.before..after`; on this repo's very
+   first push that range is degenerate (`before` == the first commit, which has no parent,
+   so `<sha>^` isn't valid) and the job hard-failed regardless of whether a secret existed.
+   Replaced with a direct CLI invocation scanning full history — also a strictly stronger
+   check.
+3. Once gitleaks actually ran, it found one real (false-positive) hit: a literal
+   `"ed25519_private_key"` placeholder string in vendored MCP tool-usage docs. Allowlisted
+   by fingerprint in `.gitleaksignore` with a comment explaining why.
+4. The `ci` workflow's Testcontainers-based control-plane tests failed on push (8 tests in
+   `ReasoningPlaneClient403Test`, 2 in `AuditTamperIntegrationTest`) — these are the two
+   real bugs described under A6 above, found for the first time by this exact CI run, not
+   a CI-only artifact. Fixed in the same commit.
+
+Final status, all on real Ubuntu GitHub-hosted runners with real Docker:
+- `ci` (control-plane 75 tests incl. 11 Testcontainers + reasoning-plane lint/types/tests):
+  **PASS** (run `34765349501`)
+- `eval` (12/12 mock-provider scenarios + regression gate): **PASS** (run `34765349543`)
+- `security` (no-shell-exec grep, Trivy fs + image scans, gitleaks full-history scan):
+  **PASS** (run `34765349529`)
+
+No repo secrets need to be added for these three workflows to stay green. `ANTHROPIC_API_KEY`
+would only be needed if a future `eval-real` CI job is added — noted as a next step, not
+wired into CI yet (A2 only wired the local `make eval-real` target).
+
+README's CI badge points at the real `ci.yml` workflow, now genuinely green. **Gate B: PASS.**
 
 ---
 

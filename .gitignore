@@ -24,6 +24,19 @@ venv/
 *.log
 eval/reports/*.tmp
 
-# claude-flow runtime state (dev tooling)
-.claude-flow/data/
-.claude-flow/sessions/
+# claude-flow runtime state (dev tooling) -- matches at any depth, not just repo root
+.claude-flow/
+
+# graphify output (unrelated tooling artifact, not part of this project)
+graphify-out/
+
+# Node / console (Next.js)
+node_modules/
+.next/
+out/
+console/test-results/
+console/playwright-report/
+
+# IDE
+.vscode/
+.idea/

@@ -115,6 +115,12 @@ public class DockerInfrastructureGateway implements InfrastructureGateway {
             if (c.getHostConfig() != null) {
                 create = create.withHostConfig(c.getHostConfig());
             }
+            if (c.getConfig() != null && c.getConfig().getLabels() != null) {
+                // Preserve the com.docker.compose.service label so the recreated container
+                // stays resolvable by findByName's label lookup after a rollback -- without
+                // this the container survives but becomes permanently unreachable by ref.
+                create = create.withLabels(c.getConfig().getLabels());
+            }
             CreateContainerResponse created = create.exec();
             docker.startContainerCmd(created.getId()).exec();
             return CapabilityOutcome.ok("rolled back " + serviceRef + " to " + toDigest,
@@ -166,8 +172,24 @@ public class DockerInfrastructureGateway implements InfrastructureGateway {
         }
     }
 
+    /**
+     * Under `docker compose`, container names are auto-generated as
+     * {@code <project>-<service>-<index>} (e.g. {@code nexusops-repo-payment-svc-1}) — they
+     * never simply equal or end with {@code /<ref>}, so a name-suffix match alone silently
+     * fails to resolve every capability against a real compose stack. The
+     * {@code com.docker.compose.service} label is stable regardless of project name or
+     * scaling index, so it's checked first; the exact/suffix name match remains as a
+     * fallback for containers started outside compose (e.g. a bare {@code docker run
+     * --name payment-svc}).
+     */
     private Optional<Container> findByName(String ref) {
         List<Container> containers = docker.listContainersCmd().withShowAll(true).exec();
+        Optional<Container> byComposeLabel = containers.stream()
+                .filter(c -> ref.equals(labelOf(c, "com.docker.compose.service")))
+                .findFirst();
+        if (byComposeLabel.isPresent()) {
+            return byComposeLabel;
+        }
         String needle = "/" + ref;
         return containers.stream()
                 .filter(c -> c.getNames() != null)
@@ -180,5 +202,9 @@ public class DockerInfrastructureGateway implements InfrastructureGateway {
                     return false;
                 })
                 .findFirst();
+    }
+
+    private static String labelOf(Container c, String key) {
+        return c.getLabels() == null ? null : c.getLabels().get(key);
     }
 }

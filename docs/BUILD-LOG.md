@@ -312,6 +312,102 @@ this log.
 
 ---
 
+## Part A — Validation fixes [2026-09-13]
+
+Continuation brief: fix issues from review, then validate against real Docker. Results
+below; see git log for the individual commits.
+
+**A1 — LangGraph version claim corrected.** ADR-0005 and this log both claimed
+`langgraph==1.2.11` "wasn't available/stable at build time." That was false — the real
+cause was no network access during the original build. Re-pinned to `langgraph==1.2.11`;
+11/11 reasoning-plane tests, ruff, and mypy --strict all pass with zero code changes (no
+usage of the APIs that moved between the two lines, e.g. `Command`/`Send`). ADR-0005 and
+the deviation entry above (#4) rewritten to state the real reason. verify-p3: **PASS**.
+
+**A2 — Eval numbers relabeled.** README now carries an explicit callout beside the eval
+table: measured against a deterministic mock provider, validates pipeline correctness not
+model quality. Added `make eval-real` (wires `ANTHROPIC_API_KEY` → `NEXUS_ANTHROPIC_API_KEY`
+/ `NEXUS_LLM_PROVIDER=anthropic`, fails fast with instructions if unset, never silently
+falls back to mock). **No `ANTHROPIC_API_KEY` was available in this environment** — the
+target is wired and documented but not yet run against a real model. Real-provider runs
+write to `eval/reports/latest-real.json`, kept separate from the mock `latest.json` so the
+two numbers are never conflated. Next validation step: run `make eval-real` with a real key.
+
+**A3 — `mean_hops` labeled.** `eval/harness.py` now attaches an explicit
+`mean_hops_note` ("mock artifact — always exhausts its fixed 6-tool sequence") when the
+provider is `mock`, and the README table carries the same caveat inline instead of
+presenting a constant of the mock's design as a measurement.
+
+**A4 — `ROTATE_LOG` fail-closed, proven.** `DockerInfrastructureGateway.rotateLog` already
+returned a typed `CapabilityOutcome.failed(...)` (never a fabricated success) — what was
+missing was a test proving the executor surfaces it as `ExecutionStatus.FAILED`, audited,
+visible to the policy/verifier layer. Added
+`CapabilityExecutorTest.rotateLogDegradesToFailedRatherThanSilentSuccess`; documented the
+real constraint (no host log-driver access in the single-host demo) in README's "What I'd
+do next."
+
+**A5 — `eval/demo.sh` reviewed line-by-line against current controllers before running it
+unattended.** Endpoints (`/api/incidents`, `/api/incidents/{id}/diagnose`,
+`/api/audit/verify`), request/response shapes, the Keycloak `nexusops-cli` client and
+`operator` user, and the `prod-restart-low-blast-auto` policy rule all matched current
+code — no drift there. **Found one real bug**: two `/toggle/leak` calls (~100MB against
+demo-svc's 128MB internal limit, ~78%) don't reliably cross demo-svc's own `oomKilled`
+threshold (≥95%) or the mock provider's OOM-detection threshold (≥90%) once baseline
+interpreter overhead is accounted for. The demo would still emit `RESTART_CONTAINER`/`LOW`
+blast (falling through to the generic "unclassified failure" branch) so it wouldn't
+visibly fail, but the narrative would be wrong — not actually detecting OOM. Bumped to
+three calls for real margin.
+
+**A4.5 (found during A6 prep, not in the original punch list) — container-name resolution
+bug that would have silently broken every capability against a real compose stack.**
+`DockerInfrastructureGateway.findByName` matched containers whose Docker name ends with
+`/<ref>` (e.g. `/payment-svc`). Under `docker compose`, container names are
+auto-generated as `<project>-<service>-<index>` (e.g. `nexusops-repo-payment-svc-1`) —
+that name does **not** end with `/payment-svc`, so `restartContainer`, `scaleService`,
+`clearCache`, and `rollbackImage` would all have failed to resolve their target against
+the real demo stack, something no existing test caught because no test exercised this
+gateway against a real Docker daemon (the 11 Testcontainers integration tests cover
+Postgres/Keycloak, not this gateway). Fixed `findByName` to match on the
+`com.docker.compose.service` label first (stable regardless of project name or scaling
+index), falling back to the name-suffix heuristic for containers started outside compose.
+Also fixed `rollbackImage` to preserve the original container's labels on recreate — without
+this, a container survived a rollback but became permanently unreachable by ref afterward
+(no compose label, and its real name never matched the suffix heuristic either). Verified
+by the live run below rather than a new Mockito unit test — docker-java's `Container`
+model has no public setters (Jackson-only construction), and the real Docker run was about
+to happen anyway, making it the more direct and honest verification.
+
+**A6 — Docker validation run: BLOCKED by host disk exhaustion, not by the code.**
+`docker info` initially connected fine (Docker Desktop 28.0.4, daemon reachable). `make up`
+began pulling/building images, then failed partway through:
+```
+failed commit on ref "layer-sha256:a48...": commit failed: sync failed: sync
+/var/lib/desktop-containerd/.../ingest/.../data: input/output error
+make: *** [up] Error 1
+```
+`df -h /` showed **2.5GB free** on the host disk — insufficient for the remaining image
+layers (postgres, keycloak, otel-collector, tempo, prometheus, grafana, plus the two
+custom-built images). The Docker daemon itself crashed after the failed write and did not
+come back on its own. This is a host-disk-space constraint, not a code or exFAT issue (the
+project lives on the external exFAT drive per the existing AppleDouble note, but Docker
+Desktop's own VM disk lives on the internal boot volume, which is what's full) — freeing
+space on the user's machine is not something to do unilaterally without asking, so this
+was not attempted. Per the brief's own contingency ("if Docker is unavailable... leave
+every gate below as PENDING"), all of verify-p1/p2/p6/p7/p8's Docker-gated assertions,
+`make demo`, and `make eval-live` remain **PENDING — BLOCKED on host disk space**, not
+silently dropped. The `make eval-live` target itself (to fill in resolution_rate /
+time-to-remediation) was designed but not yet built, since there's no environment to
+prove it against yet; building it blind without being able to run it would risk exactly
+the kind of "written but never executed" gap A5 just found in `demo.sh`.
+
+**What would unblock this:** free disk space on the host (or point `DOCKER_HOME`/Docker
+Desktop's data at the external drive with more room) and re-run `make up && make
+verify-p1 && ... && make verify-p8 && make demo`. The A4.5 container-name-resolution fix
+should be verified first thing once Docker is available again — it's the highest-risk
+unverified change in this pass.
+
+---
+
 # FINAL REPORT
 
 ## Phase results

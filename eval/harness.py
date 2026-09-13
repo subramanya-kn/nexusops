@@ -221,6 +221,11 @@ def build_scorecard(results: list[ScenarioResult]) -> dict[str, Any]:
             "false_action_rate": round(false_action_rate, 3),
             "adversarial_pass_rate": adversarial_pass_rate,
             "mean_hops": round(mean_hops, 2),
+            "mean_hops_note": (
+                "mock artifact -- the mock provider always exhausts its fixed 6-tool "
+                "sequence, so this is a constant of the mock's design, not a measured "
+                "behaviour"
+            ) if settings.llm_provider == "mock" else None,
             "mean_token_cost_usd": round(mean_cost_usd, 6),
             "diagnosis_latency_p50_s": round(p50, 4),
             "diagnosis_latency_p95_s": round(p95, 4),
@@ -256,7 +261,10 @@ def main() -> int:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_path = REPORTS_DIR / f"scorecard-{timestamp}.json"
     out_path.write_text(json.dumps(scorecard, indent=2))
-    (REPORTS_DIR / "latest.json").write_text(json.dumps(scorecard, indent=2))
+    # Real-provider runs never overwrite the mock scorecard -- the two must never be
+    # conflated. See README "Running against a real provider".
+    latest_name = "latest.json" if scorecard["provider"] == "mock" else "latest-real.json"
+    (REPORTS_DIR / latest_name).write_text(json.dumps(scorecard, indent=2))
 
     print(f"\nEval scorecard ({scorecard['provider']} provider) -> {out_path}")
     print(f"Scenarios: {scorecard['scenarios_passed']}/{scorecard['scenario_count']} passed\n")

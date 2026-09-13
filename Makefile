@@ -41,6 +41,18 @@ demo: ## Scripted end-to-end incident (Phase 7)
 eval: ## Run scenario harness and write scorecard (Phase 5)
 	python3 eval/harness.py
 
+eval-real: ## Run scenario harness against the real Anthropic provider (Part A validation)
+	@if [ -z "$$ANTHROPIC_API_KEY" ]; then \
+	  echo "FAIL: ANTHROPIC_API_KEY is not set."; \
+	  echo "  export ANTHROPIC_API_KEY=sk-ant-... && make eval-real"; \
+	  echo "  This target never silently falls back to the mock provider."; \
+	  exit 1; \
+	fi
+	cd $(RP) && pip install -e '.[anthropic]' -q
+	NEXUS_LLM_PROVIDER=anthropic NEXUS_ANTHROPIC_API_KEY=$$ANTHROPIC_API_KEY python3 eval/harness.py
+	@test -f eval/reports/latest-real.json || { echo "FAIL: no real-provider scorecard written"; exit 1; }
+	@echo "Real-provider scorecard: eval/reports/latest-real.json (kept separate from the mock latest.json)"
+
 chaos: ## Inject a chaos scenario (Phase 5)
 	@bash eval/chaos/run.sh 2>/dev/null || { echo "chaos not implemented until Phase 5"; exit 1; }
 

@@ -152,6 +152,13 @@ provider — offline, deterministic). Numbers below are the actual committed sco
 ([`eval/reports/latest.json`](eval/reports/latest.json)), not illustrative examples.
 Methodology: [`docs/BUILD-LOG.md`](docs/BUILD-LOG.md#phase-5-2026-09-05).
 
+> **Measured against a deterministic mock LLM provider — this validates pipeline
+> correctness (routing, hop-capping, policy gating, injection defense), not model
+> quality.** A perfect 1.0 here means "the harness correctly executes what a
+> rule-based stand-in decides," not "the agent reasons perfectly." See
+> [Running against a real provider](#running-against-a-real-provider) below for numbers
+> that actually measure model quality.
+
 | Metric | Value |
 |---|---|
 | Scenarios passed | 12 / 12 |
@@ -159,7 +166,7 @@ Methodology: [`docs/BUILD-LOG.md`](docs/BUILD-LOG.md#phase-5-2026-09-05).
 | Remediation appropriateness | 1.0 |
 | False-action rate | 0.0 |
 | **Adversarial pass rate** | **1.0** (1/1 — see scenario 12, prompt injection) |
-| Mean hops per diagnosis | 7.0 |
+| Mean hops per diagnosis | 7.0 *(mock artifact — the mock provider always exhausts its fixed 6-tool sequence; this is a constant of the mock's design, not a measured behaviour — will vary once run against a real provider)* |
 | Mean token cost per diagnosis (mock) | $0.00762 |
 | Diagnosis latency (p50 / p95) | 0.003s / 0.008s |
 | Resolution rate | **PENDING** — requires `docker compose up` against real demo-svc containers; not fabricated |
@@ -169,6 +176,21 @@ The two PENDING rows measure whether an *executed* plan actually fixes the real 
 — that requires the live compose stack, which this build environment doesn't have Docker
 for. Everything upstream of execution (diagnosis correctness, policy gating, the
 adversarial defense) is exercised for real, not simulated for the README.
+
+### Running against a real provider
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+make eval-real
+```
+
+`make eval-real` sets `NEXUS_LLM_PROVIDER=anthropic` and wires your `ANTHROPIC_API_KEY`
+through to the reasoning plane's `NEXUS_ANTHROPIC_API_KEY` setting for you. It fails fast
+with setup instructions if `ANTHROPIC_API_KEY` is unset —
+it will not silently fall back to the mock and relabel mock numbers as real. Results land
+in `eval/reports/latest-real.json`, kept separate from the mock scorecard so the two are
+never conflated. A real score below 1.0 with a short failure analysis is the expected,
+more credible outcome — see `docs/BUILD-LOG.md` for whichever of these applies to this run.
 
 ## Observability
 

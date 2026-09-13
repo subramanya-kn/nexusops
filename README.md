@@ -297,6 +297,15 @@ Honest limitations, not a roadmap slide:
   access rebuilds a consistent chain" gap.
 - **No coverage tooling wired yet** (no JaCoCo, no `coverage.py` in CI) — the coverage
   badge above says so honestly rather than showing a made-up percentage.
+- **`ROTATE_LOG` is not actually implementable in the single-host demo** — true log
+  rotation needs host log-driver access (the `json-file` path or a rotation sidecar), which
+  this Docker-only gateway doesn't have. `DockerInfrastructureGateway.rotateLog` fails
+  closed instead of faking success: it returns `CapabilityOutcome.failed(...)`, which the
+  executor surfaces as `ExecutionStatus.FAILED` (audited, visible to the policy/verifier
+  layer, never a silent no-op dressed up as success) — see
+  `CapabilityExecutorTest.rotateLogDegradesToFailedRatherThanSilentSuccess`. Real support
+  needs either host filesystem access to the container's log path or a dedicated
+  log-rotation sidecar with its own mount.
 - **Every Docker-dependent gate is code-complete but unexercised in this environment.**
   `make demo`, the live cross-plane trace, Testcontainers integration tests against real
   Postgres/Keycloak, and the actual resolution-rate/time-to-remediation eval metrics all

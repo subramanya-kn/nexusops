@@ -158,6 +158,26 @@ class CapabilityExecutorTest {
     }
 
     @Test
+    void rotateLogDegradesToFailedRatherThanSilentSuccess() {
+        // The single-host demo gateway has no host log-driver access, so ROTATE_LOG can
+        // never actually rotate anything. It must fail closed (FAILED, audited,
+        // force-escalation-visible) -- never a fabricated SUCCEEDED for an operation that
+        // didn't happen. See DockerInfrastructureGateway.rotateLog.
+        PlanAction rotate = new PlanAction(ActionType.ROTATE_LOG, "payment-svc", Map.of(), "disk pressure");
+        when(executions.findByExecutionKey("key-9")).thenReturn(Optional.empty());
+        when(registry.exists("payment-svc")).thenReturn(true);
+        when(gateway.rotateLog("payment-svc")).thenReturn(
+                CapabilityOutcome.failed("rotate-log not supported in single-host demo "
+                        + "(needs host log-driver access)", "pre"));
+
+        ExecutionRecordEntity result = executor.execute("inc-1", "corr-1", rotate, "key-9", false);
+
+        assertThat(result.getStatus()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(result.getDetail()).contains("not supported");
+        verify(audit, times(1)).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void successfulExecutionIsAudited() {
         when(executions.findByExecutionKey("key-8")).thenReturn(Optional.empty());
         when(registry.exists("payment-svc")).thenReturn(true);

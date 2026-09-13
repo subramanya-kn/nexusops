@@ -1,0 +1,7 @@
+# Gitleaks fingerprint allowlist. Every entry here has been manually reviewed -- see the
+# comment on each line for why it's a false positive, not a suppressed real finding.
+
+# .claude/agents/payments/agentic-payments.md:35 -- "ed25519_private_key" is a literal
+# example placeholder string in MCP tool-usage documentation (vendored agent-persona
+# framework content, not NexusOps application code), not an actual key.
+6681f3bf66302ac5654eba7a9a0a5f17a4143216:.claude/agents/payments/agentic-payments.md:generic-api-key:35

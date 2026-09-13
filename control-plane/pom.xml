@@ -164,13 +164,23 @@
             </plugin>
             <plugin>
                 <!-- exFAT/macOS AppleDouble sidecar files (._Foo.class) regenerate on this
-                     drive and are picked up as bogus test classes without this exclude. -->
+                     drive continuously; they get recreated as soon as anything touches the
+                     real file again, so deleting them once after compilation isn't enough. The
+                     surefire exclude stops surefire from *running* them as tests; that alone
+                     doesn't stop Spring's own classpath component scan (@SpringBootTest
+                     resolving its @Configuration class) from choking on one it finds under
+                     target/test-classes with a ClassFormatException. spring.classformat.ignore
+                     is Spring's own supported escape hatch for exactly this (it's named in the
+                     exception message this repo used to hit), so both are set together here. -->
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <excludes>
                         <exclude>**/._*</exclude>
                     </excludes>
+                    <systemPropertyVariables>
+                        <spring.classformat.ignore>true</spring.classformat.ignore>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

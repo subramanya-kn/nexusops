@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -37,7 +38,12 @@ public class AuditService {
         String prevHash = repository.findFirstByOrderBySeqDesc()
                 .map(AuditEntryEntity::getHash)
                 .orElse(GENESIS);
-        Instant now = Instant.now();
+        // Truncated to microseconds: TIMESTAMPTZ stores microsecond precision, so an
+        // untruncated nanosecond-precision Instant computed here would hash differently
+        // than the same row read back from Postgres later -- verifyChain() would then
+        // report every intact row as tampered. Truncating up front keeps the write-time and
+        // read-time Instant (and therefore its toString()) byte-for-byte identical.
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         String hash = computeHash(prevHash, incidentId, correlationId, eventType,
                 payloadJson, actor, now);
         return repository.save(new AuditEntryEntity(incidentId, correlationId, eventType,

@@ -222,7 +222,7 @@ resolution rate) are code-complete and documented as not-yet-exercised in
 | Python | ≥3.11 (3.12 in Docker images) |
 | FastAPI | 0.115.5 |
 | Pydantic | 2.9.2 |
-| LangGraph | 0.2.53 |
+| LangGraph | 1.2.11 |
 | httpx | 0.27.2 |
 | structlog | 24.4.0 |
 | OpenTelemetry | 1.28.2 |

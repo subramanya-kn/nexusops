@@ -346,9 +346,13 @@ not have.
    `control-plane` uses `jwk-set-uri` (lazy validation) specifically so it doesn't
    hard-depend on Keycloak being up first. Gate-relevant healthchecks (postgres, redis,
    control-plane, reasoning-plane, demo services) are present. (Phase 1)
-4. **`langgraph==0.2.53` instead of the brief's `langgraph==1.2.11`.** The 1.2.11 line
-   wasn't available/stable against the rest of the pinned stack at build time. (Phase 1,
-   formalized in ADR-0005)
+4. **~~`langgraph==0.2.53` instead of the brief's `langgraph==1.2.11`~~ — corrected.** The
+   original claim that 1.2.11 "wasn't available/stable" was false; it installs and runs
+   cleanly with zero code changes (no usage of APIs that moved, e.g. `Command`/`Send`).
+   The real cause was no network access during the original build, not incompatibility.
+   Re-pinned to `langgraph==1.2.11`; 11/11 reasoning-plane tests, ruff, and mypy --strict
+   all pass unchanged. ADR-0005 rewritten to state the real reason. (Phase 1, corrected in
+   the validation-fixes pass — see Part A of this log)
 5. **Local toolchain default resolved to a JDK 26 preview (Homebrew)**, which breaks
    Mockito's inline mock maker. Test runs pin `JAVA_HOME` to the project's actual Java 21
    target (Temurin) instead. (Phase 2)
@@ -376,7 +380,7 @@ not have.
 See the README's "Tech stack" section for the full table. Headline pins: Java 21
 (Temurin) / Spring Boot 3.3.4 / docker-java 3.4.0 / Resilience4j 2.2.0 / springdoc-openapi
 2.6.0 / Testcontainers 1.20.2 · Python ≥3.11 (3.12 in images) / FastAPI 0.115.5 /
-Pydantic 2.9.2 / LangGraph 0.2.53 / httpx 0.27.2 / structlog 24.4.0 / OpenTelemetry
+Pydantic 2.9.2 / LangGraph 1.2.11 / httpx 0.27.2 / structlog 24.4.0 / OpenTelemetry
 1.28.2 · Postgres 16 / Keycloak 25.0 / Redis 7 / OTel Collector 0.111.0 / Tempo 2.6.0 /
 Prometheus v2.55.1 / Grafana 11.2.2.
 

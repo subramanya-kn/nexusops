@@ -34,9 +34,12 @@ with the validation errors fed back, then escalates rather than looping indefini
 - **Negative:** LangGraph is a genuine dependency with its own release cadence and mental
   model (nodes, edges, reducers) that a contributor has to learn; a hand-rolled while-loop
   would have zero new concepts, at the cost of the state/observability benefits above.
-- **Negative:** the project pins `langgraph==0.2.53` for stability; the brief specified
-  `langgraph==1.2.11` but that version wasn't yet available/stable against the rest of the
-  pinned stack at build time — recorded as a deviation in `docs/BUILD-LOG.md`.
+- **Negative:** the project originally pinned `langgraph==0.2.53` instead of the brief's
+  `langgraph==1.2.11`. The real cause was that the build environment had no network access
+  at the time, not any actual incompatibility — `1.2.11` was never test-installed. Once
+  network access was available the pin was corrected to `langgraph==1.2.11` with no code
+  changes required (no usage of `Command`/`Send` or other APIs that moved between the two
+  lines); see `docs/BUILD-LOG.md` for the correction record.
 
 ## Alternatives rejected
 

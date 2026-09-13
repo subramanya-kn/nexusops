@@ -91,26 +91,31 @@ public class ApprovalService {
 
     /** Human approval — subject comes from the authenticated JWT, never a request param. */
     @Transactional
-    public ApprovalRecordEntity approve(String approvalId, String subject) {
+    public ApprovalRecordEntity approve(String approvalId, String subject, String reason) {
         ApprovalRecordEntity record = get(approvalId);
         record.transitionTo(ApprovalState.APPROVED);
         record.recordApprover(subject);
-        record.setDetail("approved by " + subject);
+        record.setDetail("approved by " + subject + reasonSuffix(reason));
         auditState(record, "APPROVAL_APPROVED", subject);
         recordDecisionMetrics(record, "human");
         return repository.save(record);
     }
 
     @Transactional
-    public ApprovalRecordEntity reject(String approvalId, String subject) {
+    public ApprovalRecordEntity reject(String approvalId, String subject, String reason) {
         ApprovalRecordEntity record = get(approvalId);
         record.transitionTo(ApprovalState.REJECTED);
         record.recordApprover(subject);
-        record.setDetail("rejected by " + subject);
+        record.setDetail("rejected by " + subject + reasonSuffix(reason));
         auditState(record, "APPROVAL_REJECTED", subject);
         record.transitionTo(ApprovalState.CLOSED);
         recordDecisionMetrics(record, "human");
         return repository.save(record);
+    }
+
+    /** The console requires a reason for human approve/reject; older callers may omit it. */
+    private static String reasonSuffix(String reason) {
+        return (reason == null || reason.isBlank()) ? "" : ": " + reason;
     }
 
     /**

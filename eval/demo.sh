@@ -42,9 +42,16 @@ TOKEN_JSON=$(curl -fsS -X POST \
 OPERATOR_TOKEN=$(json_field "$TOKEN_JSON" "d['access_token']")
 
 echo "== 3/6: injecting memory pressure on $SERVICE_REF (via the loadgen container, same network) =="
+# demo-svc allocates ~50MB per /toggle/leak call against a 128MB internal limit
+# (_MEM_LIMIT_MB in demo-svc/app.py; mem_pct prefers real cgroup usage, falling back to
+# the leak-buffer size only where no cgroup memory controller is visible). Two calls
+# (~100MB, ~78% of the buffer alone) don't reliably clear demo-svc's own oomKilled
+# threshold (>=95%) or the mock provider's OOM-detection threshold (>=90%) once baseline
+# interpreter overhead is accounted for -- the diagnosis could silently fall through to
+# the generic "unclassified failure" branch instead of genuinely detecting OOM, even
+# though the resulting action happens to coincide. Three calls (~150MB) gives real margin.
 docker compose exec -T loadgen sh -c \
-  "curl -sf -X POST http://$SERVICE_REF:8080/toggle/leak && curl -sf -X POST http://$SERVICE_REF:8080/toggle/leak" \
-  >/dev/null
+  "for i in 1 2 3; do curl -sf -X POST http://$SERVICE_REF:8080/toggle/leak >/dev/null; done"
 
 echo "== 4/6: creating the incident =="
 INCIDENT_JSON=$(curl -fsS -X POST "$CONTROL_URL/api/incidents" \
